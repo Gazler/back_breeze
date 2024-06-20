@@ -31,7 +31,7 @@ defmodule BackBreeze.MixProject do
   # Run "mix help deps" to learn about dependencies.
   defp deps do
     [
-      {:termite, git: "git@github.com:gazler/termite.git"}
+      {:termite, path: "../termite"}
     ]
   end
 end

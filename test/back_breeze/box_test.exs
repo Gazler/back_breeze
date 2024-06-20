@@ -13,7 +13,7 @@ defmodule BackBreeze.BoxTest do
 
     test "renders a tree of children joined horizontally" do
       child = BackBreeze.Box.new(content: "Hello", style: %{bold: true, foreground_color: 3})
-      nested = BackBreeze.Box.new(children: [child], style: %{border: BackBreeze.Border.line()})
+      nested = BackBreeze.Box.new(children: [child], style: %{border: :line})
 
       world = BackBreeze.Box.new(content: "World", style: %{italic: true})
       box = BackBreeze.Box.new(children: [child, nested, nested, world])
