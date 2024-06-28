@@ -1,4 +1,4 @@
-defmodule BackBreeze.RenderingTest do
+defmodule BackBreeze.AbsoluteTest do
   use ExUnit.Case, async: true
 
   test "absolute positioning" do

@@ -58,17 +58,8 @@ defmodule BackBreeze.Style do
     %{style | foreground_color: color}
   end
 
-  defp screen_width() do
-    {:ok, cols} = :io.columns()
-    cols
-  end
-
-  defp screen_height() do
-    {:ok, height} = :io.rows()
-    height
-  end
-
-  def render(style, str) do
+  def render(style, str, opts \\ []) do
+    {screen_width, screen_height} = BackBreeze.screen_dimensions(Keyword.get(opts, :terminal))
     style = Map.from_struct(style)
 
     string_length = BackBreeze.Utils.string_length(str)
@@ -78,9 +69,11 @@ defmodule BackBreeze.Style do
     {width, style} = Map.pop(style, :width, string_length)
     {height, style} = Map.pop(style, :height, 0)
 
+    width = if width == :auto, do: string_length, else: width
+
     {width, str} =
       cond do
-        width == :screen -> {screen_width() - 2, str}
+        width == :screen -> {screen_width - 2, str}
         overflow == :auto && string_length > width -> {string_length, str}
         overflow == :hidden && string_length > width -> {width, String.slice(str, 0, width)}
         true -> {width, str}
@@ -88,7 +81,7 @@ defmodule BackBreeze.Style do
 
     height =
       cond do
-        height == :screen -> screen_height() - 2
+        height == :screen -> screen_height - 2
         true -> height
       end
 
@@ -112,7 +105,7 @@ defmodule BackBreeze.Style do
         BackBreeze.Border.render_right(border)
 
     padding =
-      if height > 0 do
+      if height > 1 do
         Enum.reduce(1..(height - 1), "", fn _i, acc ->
           acc <>
             BackBreeze.Border.render_left(border) <>
@@ -125,7 +118,7 @@ defmodule BackBreeze.Style do
 
     BackBreeze.Border.render_top(border, width) <>
       content <>
-      if(border.bottom, do: "\n", else: "") <>
+      if(padding != "" || border.bottom, do: "\n", else: "") <>
       padding <> BackBreeze.Border.render_bottom(border, width)
   end
 end

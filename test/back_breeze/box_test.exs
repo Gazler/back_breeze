@@ -93,7 +93,7 @@ defmodule BackBreeze.BoxTest do
   describe "join_vertical/2" do
     test "joins items vertically" do
       items = ["One line", "Two\nLines", "Three\n+\n+\nLines"]
-      {content, 8, 3} = BackBreeze.Box.join_vertical(items)
+      {content, 8, 7} = BackBreeze.Box.join_vertical(items)
 
       assert content ==
                """

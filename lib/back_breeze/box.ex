@@ -28,27 +28,34 @@ defmodule BackBreeze.Box do
     struct(BackBreeze.Box, Map.put(map, :style, style))
   end
 
-  def render(%{state: :rendered} = box) do
+  def render(box, opts \\ [])
+
+  def render(%{state: :rendered} = box, _opts) do
     box
   end
 
-  def render(%{children: []} = box) do
-    {content, width} = render_self(box)
+  def render(%{children: []} = box, opts) do
+    {content, width} = render_self(box, opts)
     %{box | content: content, width: width, state: :rendered, children: []}
   end
 
-  def render(box) do
-    {child_layer_map, child_width, child_height} = render_children(box)
+  def render(box, opts) do
+    {child_layer_map, child_width, child_height} = render_children(box, opts)
 
     width =
       if box.style.overflow == :hidden,
         do: box.style.width,
         else: max(box.style.width, child_width)
 
-    style = %{box.style | width: width}
+    height =
+      if box.style.overflow == :hidden,
+        do: box.style.height,
+        else: max(box.style.height, child_height)
+
+    style = %{box.style | width: width, height: height}
 
     {content, _width} =
-      render_self(%{box | content: box.content, width: width, style: style})
+      render_self(%{box | width: width, height: height, style: style}, opts)
 
     {layer_map, max_width, max_height} = generate_layer_map(content, %{}, 0, 0)
 
@@ -106,8 +113,8 @@ defmodule BackBreeze.Box do
     %{box | content: content, width: max_width + 1, state: :rendered}
   end
 
-  defp render_self(box) do
-    content = BackBreeze.Style.render(box.style, box.content)
+  defp render_self(box, opts) do
+    content = BackBreeze.Style.render(box.style, box.content, opts)
 
     items =
       String.split(content, "\n")
@@ -117,8 +124,51 @@ defmodule BackBreeze.Box do
     {content, max_width}
   end
 
-  defp render_children(%{children: children} = box) when children != [] do
-    children = set_layer(children, [], -1) |> Enum.map(&render/1)
+  defp render_children(%{children: children, display: %BackBreeze.Grid{}} = box, opts) do
+    %{width: item_width} = BackBreeze.Grid.precompute(children, box.display, box.style, opts)
+
+    children =
+      Enum.map(children, fn
+        %{display: %BackBreeze.Grid{}, children: children} = child_box when children != [] ->
+          style = %{child_box.style | width: item_width}
+
+          {content, w, h} =
+            BackBreeze.Grid.render(child_box.children, child_box.display, style, opts)
+
+          %{child_box | children: [], content: content, width: w, height: h, state: :rendered}
+
+        child_box ->
+          child_box
+      end)
+      |> set_layer([], -1)
+
+    relative = Enum.filter(children, &(&1.position != :absolute))
+
+    {layer, style} =
+      case relative do
+        [x | _] -> {x.layer, x.style}
+        _ -> {0, %BackBreeze.Style{}}
+      end
+
+    {content, width, height} = BackBreeze.Grid.render(children, box.display, box.style, opts)
+
+    absolutes = Enum.filter(children, &(&1.position == :absolute))
+
+    relative = %{
+      box
+      | style: style,
+        content: content,
+        children: [],
+        height: height,
+        width: width,
+        layer: layer
+    }
+
+    combine_children(box, absolutes, relative)
+  end
+
+  defp render_children(%{children: children} = box, opts) when children != [] do
+    children = set_layer(children, [], -1) |> Enum.map(&render(&1, opts))
 
     relative =
       children
@@ -150,6 +200,10 @@ defmodule BackBreeze.Box do
         layer: layer
     }
 
+    combine_children(box, absolutes, relative)
+  end
+
+  defp combine_children(box, absolutes, relative) do
     rendered_boxes = [relative | absolutes] |> Enum.sort_by(& &1.layer)
 
     border = box.style.border
@@ -241,7 +295,7 @@ defmodule BackBreeze.Box do
       |> Enum.join("\n")
       |> String.trim_trailing("\n")
 
-    {content, max_width, length(items)}
+    {content, max_width, content |> String.split("\n") |> length()}
   end
 
   def join_horizontal(items, opts \\ [])
