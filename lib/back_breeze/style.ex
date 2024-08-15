@@ -62,6 +62,11 @@ defmodule BackBreeze.Style do
   end
 
   def render(style, str, opts \\ []) do
+    {content, _} = calculate_and_render(style, str, opts)
+    content
+  end
+
+  def calculate_and_render(style, str, opts \\ []) do
     {screen_width, screen_height} = BackBreeze.screen_dimensions(Keyword.get(opts, :terminal))
     style = Map.from_struct(style)
 
@@ -82,6 +87,9 @@ defmodule BackBreeze.Style do
 
     border = %{border | color: style.border_color}
     lines = String.split(str, "\n")
+
+    content_height = length(lines)
+    original_height = height
 
     width =
       if auto_width && length(lines) > 1,
@@ -120,10 +128,13 @@ defmodule BackBreeze.Style do
         ""
       end
 
-    BackBreeze.Border.render_top(border, width) <>
-      String.trim_trailing(content, "\n") <>
-      if(padding != "" || border.bottom, do: "\n", else: "") <>
-      padding <> BackBreeze.Border.render_bottom(border, width)
+    content =
+      BackBreeze.Border.render_top(border, width) <>
+        String.trim_trailing(content, "\n") <>
+        if(padding != "" || border.bottom, do: "\n", else: "") <>
+        padding <> BackBreeze.Border.render_bottom(border, width)
+
+    {content, %{height: original_height, content_height: content_height}}
   end
 
   defp to_termite(style) do

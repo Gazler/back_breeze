@@ -53,19 +53,47 @@ defmodule BackBreeze.Box do
     * `:offset_top` - number of columns to offset from the top.
     * `:terminal` - the terminal to use. This is used for the terminal size if provided.
   """
-  def render(box, opts \\ [])
-
-  def render(%{state: :rendered} = box, _opts) do
-    box
+  def render(box, opts \\ []) do
+    render_with_dimensions(box, opts)
+    |> Map.get(:box)
   end
 
-  def render(%{children: []} = box, opts) do
-    {content, width} = render_self(box, opts)
-    %{box | content: content, width: width, state: :rendered, children: []}
+  @doc """
+  Render a box and a tree of its children whilst tracking dimensions.
+
+  This function returns the box as with `render/2`, but it is wrapped in a map which
+  also contains the rendered dimension for each box as a flat list.
+  This can be used at a higher level to determine the viewport.
+
+  ## Options
+
+  See `render/2`
+  """
+
+  def render_with_dimensions(box, opts \\ []) do
+    %{box: box, dimensions: dimensions} =
+      render_and_calc(%{box: box, dimensions: [], id: 0}, opts)
+
+    dimensions = Enum.sort(dimensions) |> Enum.map(&elem(&1, 1))
+    %{box: box, dimensions: dimensions}
   end
 
-  def render(box, opts) do
-    {child_layer_map, child_width, child_height} = render_children(box, opts)
+  defp render_and_calc(%{box: %{state: :rendered}} = acc, _opts) do
+    acc
+  end
+
+  defp render_and_calc(%{box: %{children: []} = box} = acc, opts) do
+    {content, dimensions, width} = render_self(box, opts)
+    box = %{box | content: content, width: width, state: :rendered, children: []}
+    %{acc | box: box, dimensions: [{acc.id, dimensions} | acc.dimensions], id: acc.id + 1}
+  end
+
+  defp render_and_calc(%{box: box} = acc, opts) do
+    prev_id = acc.id
+
+    {child_layer_map, child_width, child_height, acc} =
+      render_children(%{acc | id: prev_id + 1}, opts)
+
     style_width = if box.style.width == :auto, do: 0, else: box.style.width
 
     width =
@@ -82,8 +110,10 @@ defmodule BackBreeze.Box do
 
     style = %{box.style | width: width, height: height}
 
-    {content, _width} =
+    {content, dimensions, _width} =
       render_self(%{box | width: width, height: height, style: style}, opts)
+
+    acc = %{acc | dimensions: [{prev_id, dimensions} | acc.dimensions], id: acc.id}
 
     {layer_map, max_width, max_height} = generate_layer_map(content, %{}, 0, 0)
 
@@ -138,23 +168,34 @@ defmodule BackBreeze.Box do
 
     content = Enum.join(content, "\n") |> String.trim_trailing("\n")
 
-    %{box | content: content, width: max_width + 1, state: :rendered}
+    box = %{
+      box
+      | content: content,
+        width: max_width + 1,
+        state: :rendered,
+        layer_map: Map.merge(layer_map, child_layer_map)
+    }
+
+    %{acc | box: box}
   end
 
   defp render_self(box, opts) do
     {offset_top, _} = box.scroll
     opts = Keyword.put(opts, :offset_top, offset_top)
-    content = BackBreeze.Style.render(box.style, box.content, opts)
+    {content, dimensions} = BackBreeze.Style.calculate_and_render(box.style, box.content, opts)
 
     items =
       String.split(content, "\n")
       |> Enum.map(&{BackBreeze.Utils.string_length(&1), &1})
 
     {max_width, _} = Enum.max(items)
-    {content, max_width}
+    {content, dimensions, max_width}
   end
 
-  defp render_children(%{children: children, display: %BackBreeze.Grid{}} = box, opts) do
+  defp render_children(
+         %{box: %{children: children, display: %BackBreeze.Grid{}} = box} = acc,
+         opts
+       ) do
     %{width: item_width} = BackBreeze.Grid.precompute(children, box.display, box.style, opts)
 
     children =
@@ -194,11 +235,18 @@ defmodule BackBreeze.Box do
         layer: layer
     }
 
-    combine_children(box, absolutes, relative)
+    combine_children(box, absolutes, relative, acc)
   end
 
-  defp render_children(%{children: children} = box, opts) when children != [] do
-    children = set_layer(children, [], -1) |> Enum.map(&render(&1, opts))
+  defp render_children(%{box: %{children: children} = box} = acc, opts) when children != [] do
+    {children, acc} =
+      set_layer(children, [], -1)
+      |> Enum.reduce({[], acc}, fn box, {boxes, child_acc} ->
+        child_acc = render_and_calc(%{child_acc | box: box}, opts)
+        {[child_acc.box | boxes], child_acc}
+      end)
+
+    children = Enum.reverse(children)
 
     relative =
       children
@@ -230,15 +278,16 @@ defmodule BackBreeze.Box do
         layer: layer
     }
 
-    combine_children(box, absolutes, relative)
+    combine_children(box, absolutes, relative, acc)
   end
 
-  defp combine_children(box, absolutes, relative) do
+  defp combine_children(box, absolutes, relative, acc) do
     rendered_boxes = [relative | absolutes] |> Enum.sort_by(& &1.layer)
 
     border = box.style.border
 
-    Enum.reduce(rendered_boxes, {%{}, 0, 0}, fn box, {layer_map, max_width, max_height} ->
+    Enum.reduce(rendered_boxes, {%{}, 0, 0, acc}, fn box,
+                                                     {layer_map, max_width, max_height, acc} ->
       {start_x, y} =
         case {box.position, border.left, border.top} do
           {:absolute, _, _} -> {box.left, box.top}
@@ -248,7 +297,7 @@ defmodule BackBreeze.Box do
         end
 
       {map, width, height} = generate_layer_map(box.content, layer_map, start_x, y)
-      {map, max(max_width, width), max(max_height, height)}
+      {map, max(max_width, width), max(max_height, height), acc}
     end)
   end
 
