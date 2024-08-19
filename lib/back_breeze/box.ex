@@ -50,7 +50,6 @@ defmodule BackBreeze.Box do
 
   ## Options
 
-    * `:offset_top` - number of columns to offset from the top.
     * `:terminal` - the terminal to use. This is used for the terminal size if provided.
   """
   def render(box, opts \\ []) do
@@ -91,6 +90,8 @@ defmodule BackBreeze.Box do
   defp render_and_calc(%{box: box} = acc, opts) do
     prev_id = acc.id
 
+    child_length = length(box.children)
+
     {child_layer_map, child_width, child_height, acc} =
       render_children(%{acc | id: prev_id + 1}, opts)
 
@@ -110,8 +111,15 @@ defmodule BackBreeze.Box do
 
     style = %{box.style | width: width, height: height}
 
+    # We don't want offset to apply twice in cases when there are children.
     {content, dimensions, _width} =
-      render_self(%{box | width: width, height: height, style: style}, opts)
+      render_self(%{box | width: width, height: height, style: style, scroll: {0, 0}}, opts)
+
+    dimensions =
+      Enum.take(acc.dimensions, child_length)
+      |> Enum.reduce(%{content_height: 0, height: dimensions.height}, fn {_, dims}, acc ->
+        %{acc | content_height: dims.content_height + acc.content_height}
+      end)
 
     acc = %{acc | dimensions: [{prev_id, dimensions} | acc.dimensions], id: acc.id}
 
@@ -260,9 +268,12 @@ defmodule BackBreeze.Box do
 
     items = Enum.map(relative, & &1.content)
 
+    opts = Keyword.put(opts, :height, box.style.height)
+    opts = Keyword.put(opts, :scroll, box.scroll)
+
     {content, width, height} =
       case box.display do
-        :block -> join_vertical(items)
+        :block -> join_vertical(items, opts)
         :inline -> join_horizontal(items)
       end
 
@@ -359,7 +370,7 @@ defmodule BackBreeze.Box do
     {"", 0, 0}
   end
 
-  def join_vertical(items, _opts) do
+  def join_vertical(items, opts) do
     items_with_width =
       Enum.map(items, fn x ->
         max_width =
@@ -370,12 +381,35 @@ defmodule BackBreeze.Box do
 
     {max_width, _} = Enum.max(items_with_width)
 
-    content =
+    items =
       items
       |> Enum.join("\n")
       |> String.trim_trailing("\n")
+      |> String.split("\n")
 
-    {content, max_width, content |> String.split("\n") |> length()}
+    items =
+      case Keyword.get(opts, :height) do
+        :screen ->
+          {_screen_width, screen_height} =
+            BackBreeze.screen_dimensions(Keyword.get(opts, :terminal))
+
+          height = screen_height - 2
+
+          # TODO: swap X and Y obviously
+          {start_pos, _} = Keyword.get(opts, :scroll, {0, 0})
+          end_pos = height + start_pos - 1
+          Enum.slice(items, start_pos..end_pos//1)
+
+        height when is_integer(height) ->
+          {start_pos, _} = Keyword.get(opts, :scroll, {0, 0})
+          end_pos = height + start_pos - 1
+          Enum.slice(items, start_pos..end_pos//1)
+
+        _ ->
+          items
+      end
+
+    {Enum.join(items, "\n"), max_width, length(items)}
   end
 
   @doc false
