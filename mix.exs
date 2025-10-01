@@ -22,6 +22,7 @@ defmodule BackBreeze.MixProject do
 
   def application do
     [
+      mod: {BackBreeze.Application, []},
       extra_applications: [:logger]
     ]
   end

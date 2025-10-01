@@ -1,0 +1,2 @@
+defmodule Cassowary do
+end
