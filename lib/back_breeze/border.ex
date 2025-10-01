@@ -138,7 +138,7 @@ defmodule BackBreeze.Border do
 
   ```elixir
   iex> BackBreeze.Border.line() |> BackBreeze.Border.render_bottom(10)
-  "└──────────┘\n"
+  "└──────────┘"
   ```
   """
   def render_bottom(border, width) do
