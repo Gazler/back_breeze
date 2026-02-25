@@ -116,6 +116,64 @@ defmodule BackBreeze.BoxTest do
                └─────┘\
                """
     end
+
+    test "clips children to the viewport when overflow is hidden" do
+      child = BackBreeze.Box.new(content: "ABCDEFGHIJ")
+
+      box =
+        BackBreeze.Box.new(
+          style: %{border: :line, width: 6, height: 1, overflow: :hidden},
+          children: [child]
+        )
+
+      rendered = BackBreeze.Box.render(box)
+
+      assert rendered.content ==
+               """
+               ┌──────┐
+               │ABCDEF│
+               └──────┘\
+               """
+    end
+
+    test "supports horizontal child scrolling with overflow hidden" do
+      child = BackBreeze.Box.new(content: "ABCDEFGHIJ")
+
+      box =
+        BackBreeze.Box.new(
+          scroll: {0, 2},
+          style: %{border: :line, width: 6, height: 1, overflow: :hidden},
+          children: [child]
+        )
+
+      rendered = BackBreeze.Box.render(box)
+
+      assert rendered.content ==
+               """
+               ┌──────┐
+               │CDEFGH│
+               └──────┘\
+               """
+    end
+
+    test "clips absolute children inside the viewport" do
+      child = BackBreeze.Box.new(content: "HELLO", position: :absolute, left: 5, top: 1)
+
+      box =
+        BackBreeze.Box.new(
+          style: %{border: :line, width: 6, height: 1, overflow: :hidden},
+          children: [child]
+        )
+
+      rendered = BackBreeze.Box.render(box)
+
+      assert rendered.content ==
+               """
+               ┌──────┐
+               │    HE│
+               └──────┘\
+               """
+    end
   end
 
   describe "join_vertical/2" do
