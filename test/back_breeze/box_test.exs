@@ -174,6 +174,26 @@ defmodule BackBreeze.BoxTest do
                └──────┘\
                """
     end
+
+    test "clips children with width-screen overflow hidden" do
+      child = BackBreeze.Box.new(content: "ABCDEFGHIJKLMNOPQRST")
+
+      box =
+        BackBreeze.Box.new(
+          style: %{border: :line, width: :screen, height: 1, overflow: :hidden},
+          children: [child]
+        )
+
+      rendered =
+        BackBreeze.Box.render(box, terminal: %Termite.Terminal{size: %{width: 10, height: 5}})
+
+      assert rendered.content ==
+               """
+               ┌────────┐
+               │ABCDEFGH│
+               └────────┘\
+               """
+    end
   end
 
   describe "join_vertical/2" do

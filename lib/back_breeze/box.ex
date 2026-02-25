@@ -141,7 +141,7 @@ defmodule BackBreeze.Box do
         child_layer_map
       end
 
-    child_layer_map = clip_child_layer_map(child_layer_map, box.style, width, height)
+    child_layer_map = clip_child_layer_map(child_layer_map, box.style, max_width, max_height)
 
     {max_width, max_height} =
       if box.style.overflow == :hidden do
@@ -383,12 +383,12 @@ defmodule BackBreeze.Box do
     {map, max_x - 1, y}
   end
 
-  defp clip_child_layer_map(layer_map, %{overflow: :hidden, border: border}, width, height)
-       when is_integer(width) and is_integer(height) do
+  defp clip_child_layer_map(layer_map, %{overflow: :hidden, border: border}, max_x, max_y)
+       when is_integer(max_x) and is_integer(max_y) do
     left = if border.left, do: 1, else: 0
     top = if border.top, do: 1, else: 0
-    right = left + max(width - 1, 0)
-    bottom = top + max(height - 1, 0)
+    right = max(max_x - if(border.right, do: 1, else: 0), left - 1)
+    bottom = max(max_y - if(border.bottom, do: 1, else: 0), top - 1)
 
     Enum.reduce(layer_map, %{}, fn
       {{y, x}, value}, acc when x >= left and x <= right and y >= top and y <= bottom ->
