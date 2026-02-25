@@ -43,8 +43,7 @@ defmodule BackBreeze.StyleTest do
         |> BackBreeze.Style.width(:screen)
         |> BackBreeze.Style.border()
 
-      {:ok, width} = :io.columns()
-      {:ok, height} = :io.rows()
+      {width, height} = BackBreeze.screen_dimensions(nil)
       output = BackBreeze.Style.render(style, "Hello World") |> String.split("\n")
 
       assert length(output) == height

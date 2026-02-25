@@ -46,6 +46,14 @@ defmodule BackBreeze.Grid do
 
   @doc false
   def render(items, grid, style, opts) do
+    %{content: content, width: width, height: height} =
+      render_with_dimensions(items, grid, style, opts)
+
+    {content, width, height}
+  end
+
+  @doc false
+  def render_with_dimensions(items, grid, style, opts) do
     {screen_width, screen_height} = BackBreeze.screen_dimensions(Keyword.get(opts, :terminal))
 
     width_offset = if(style.border.left, do: 1, else: 0) + if style.border.right, do: 1, else: 0
@@ -69,13 +77,14 @@ defmodule BackBreeze.Grid do
       Enum.map(cols, fn %{style: %{border: border}} = item ->
         width = item_width - if(border.left, do: 1, else: 0) - if border.right, do: 1, else: 0
         height = item_height - if(border.top, do: 1, else: 0) - if border.bottom, do: 1, else: 0
-        style = %{item.style | width: width, height: height}
-        BackBreeze.Box.render(%{item | style: style})
+
+        style = %{item.style | width: width, height: height, overflow: :hidden}
+        BackBreeze.Box.render_with_dimensions(%{item | style: style})
       end)
-      |> Enum.map(& &1.content)
-      |> BackBreeze.Box.join_horizontal()
-      |> elem(0)
+      |> BackBreeze.Joiner.new()
+      |> BackBreeze.Joiner.join_horizontal()
     end)
-    |> BackBreeze.Box.join_vertical()
+    |> BackBreeze.Joiner.merge()
+    |> BackBreeze.Joiner.join_vertical()
   end
 end

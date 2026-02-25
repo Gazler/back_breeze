@@ -7,16 +7,23 @@ defmodule BackBreeze do
   Return the screen dimensions. Use the terminal dimensions if specified
   otherwise calculate using the `:io` module.
   """
+  @default_screen_width 80
+  @default_screen_height 24
+
   def screen_dimensions(%Termite.Terminal{size: size}), do: {size.width, size.height}
   def screen_dimensions(nil), do: {screen_width(), screen_height()}
 
   defp screen_width() do
-    {:ok, cols} = :io.columns()
-    cols
+    case :io.columns() do
+      {:ok, cols} -> cols
+      _ -> @default_screen_width
+    end
   end
 
   defp screen_height() do
-    {:ok, height} = :io.rows()
-    height
+    case :io.rows() do
+      {:ok, height} -> height
+      _ -> @default_screen_height
+    end
   end
 end
