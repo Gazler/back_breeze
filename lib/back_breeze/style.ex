@@ -59,7 +59,18 @@ defmodule BackBreeze.Style do
   end
 
   @scrollbars [false, true, :vertical, :horizontal, :both]
-  def scrollbar(style \\ %Style{}, scrollbar \\ true) when scrollbar in @scrollbars do
+
+  def scrollbar(style \\ %Style{}, scrollbar \\ true)
+
+  def scrollbar(style, scrollbar) when scrollbar in @scrollbars do
+    %{style | scrollbar: scrollbar}
+  end
+
+  def scrollbar(style, scrollbar) when is_map(scrollbar) do
+    %{style | scrollbar: scrollbar}
+  end
+
+  def scrollbar(style, %BackBreeze.Scrollbar{} = scrollbar) do
     %{style | scrollbar: scrollbar}
   end
 

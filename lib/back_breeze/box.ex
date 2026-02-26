@@ -84,8 +84,10 @@ defmodule BackBreeze.Box do
   defp render_and_calc(%{box: %{children: []} = box} = acc, opts) do
     {content, dimensions, width} = render_self(box, opts)
 
+    scrollbar_config = BackBreeze.Scrollbar.normalize(box.style.scrollbar, box.style)
+
     {content, width, layer_map} =
-      if vertical_scrollbar?(box.style, dimensions) do
+      if box.style.overflow == :hidden and scrollbar_config.enabled do
         {layer_map, max_width, max_height} = generate_layer_map(content, %{}, 0, 0)
 
         layer_map =
@@ -93,7 +95,10 @@ defmodule BackBreeze.Box do
             layer_map,
             box.style,
             box.scroll,
-            dimensions,
+            %{
+              content_height: dimensions.content_height,
+              content_width: raw_content_width(box.content)
+            },
             max_width,
             max_height
           )
@@ -188,7 +193,7 @@ defmodule BackBreeze.Box do
         child_layer_map,
         box.style,
         box.scroll,
-        dimensions,
+        %{content_height: dimensions.content_height, content_width: child_width},
         max_width,
         max_height
       )
@@ -430,72 +435,376 @@ defmodule BackBreeze.Box do
     Enum.join(content, "\n") |> String.trim_trailing("\n")
   end
 
-  defp maybe_add_scrollbars(layer_map, style, scroll, dimensions, max_x, max_y) do
-    if vertical_scrollbar?(style, dimensions) do
-      add_vertical_scrollbar(layer_map, style, scroll, dimensions, max_x, max_y)
-    else
-      layer_map
+  defp maybe_add_scrollbars(layer_map, style, scroll, metrics, max_x, max_y) do
+    config = BackBreeze.Scrollbar.normalize(style.scrollbar, style)
+
+    cond do
+      style.overflow != :hidden or !config.enabled ->
+        layer_map
+
+      !is_integer(max_x) or !is_integer(max_y) ->
+        layer_map
+
+      true ->
+        {left, top, right, bottom} = viewport_bounds(style.border, max_x, max_y)
+
+        viewport_width = max(right - left + 1, 0)
+        viewport_height = max(bottom - top + 1, 0)
+
+        content_height = max(Map.get(metrics, :content_height, viewport_height), viewport_height)
+        content_width = max(Map.get(metrics, :content_width, viewport_width), viewport_width)
+
+        {vertical?, horizontal?, eff_viewport_width, eff_viewport_height} =
+          resolve_visible_axes(
+            config,
+            content_width,
+            content_height,
+            viewport_width,
+            viewport_height
+          )
+
+        if !vertical? and !horizontal? do
+          layer_map
+        else
+          vertical_placement = BackBreeze.Scrollbar.placement(config, :vertical)
+          horizontal_placement = BackBreeze.Scrollbar.placement(config, :horizontal)
+
+          x_scrollbar = if vertical_placement == :start, do: left, else: right
+          y_scrollbar = if horizontal_placement == :start, do: top, else: bottom
+
+          {vertical_start, vertical_end} =
+            trim_axis_for_intersection(top, bottom, horizontal?, horizontal_placement)
+
+          {horizontal_start, horizontal_end} =
+            trim_axis_for_intersection(left, right, vertical?, vertical_placement)
+
+          layer_map =
+            if config.mode == :inset and vertical? do
+              clear_vertical_strip(layer_map, x_scrollbar, vertical_start, vertical_end)
+            else
+              layer_map
+            end
+
+          layer_map =
+            if config.mode == :inset and horizontal? do
+              clear_horizontal_strip(layer_map, y_scrollbar, horizontal_start, horizontal_end)
+            else
+              layer_map
+            end
+
+          {scroll_top, scroll_left} = normalize_scroll(scroll)
+
+          layer_map =
+            if vertical? do
+              draw_vertical_scrollbar(
+                layer_map,
+                config,
+                x_scrollbar,
+                vertical_start,
+                vertical_end,
+                scroll_top,
+                content_height,
+                eff_viewport_height
+              )
+            else
+              layer_map
+            end
+
+          layer_map =
+            if horizontal? do
+              draw_horizontal_scrollbar(
+                layer_map,
+                config,
+                y_scrollbar,
+                horizontal_start,
+                horizontal_end,
+                scroll_left,
+                content_width,
+                eff_viewport_width
+              )
+            else
+              layer_map
+            end
+
+          maybe_draw_intersection(
+            layer_map,
+            config,
+            vertical?,
+            horizontal?,
+            x_scrollbar,
+            y_scrollbar
+          )
+        end
     end
   end
 
-  defp vertical_scrollbar?(
-         %{overflow: :hidden, scrollbar: scrollbar},
-         %{content_height: content_height, viewport_height: viewport_height}
-       )
-       when scrollbar in [true, :vertical, :both] and is_integer(content_height) and
-              is_integer(viewport_height) do
-    content_height > viewport_height and viewport_height > 0
-  end
-
-  defp vertical_scrollbar?(_style, _dimensions), do: false
-
-  defp add_vertical_scrollbar(
-         layer_map,
-         %{border: border},
-         {scroll_top, _},
-         dimensions,
-         max_x,
-         max_y
-       )
-       when is_integer(max_x) and is_integer(max_y) do
+  defp viewport_bounds(border, max_x, max_y) do
     left = if border.left, do: 1, else: 0
     top = if border.top, do: 1, else: 0
 
     right = max(max_x - if(border.right, do: 1, else: 0), left)
     bottom = max(max_y - if(border.bottom, do: 1, else: 0), top)
 
-    viewport_height = bottom - top + 1
+    {left, top, right, bottom}
+  end
 
-    if viewport_height <= 0 or max_x < left or max_y < top do
+  defp resolve_visible_axes(
+         config,
+         content_width,
+         content_height,
+         viewport_width,
+         viewport_height
+       ) do
+    vertical? =
+      BackBreeze.Scrollbar.axis_enabled?(config, :vertical) and
+        BackBreeze.Scrollbar.visible?(config, :vertical, content_height, viewport_height)
+
+    horizontal? =
+      BackBreeze.Scrollbar.axis_enabled?(config, :horizontal) and
+        BackBreeze.Scrollbar.visible?(config, :horizontal, content_width, viewport_width)
+
+    {eff_viewport_width, eff_viewport_height} =
+      BackBreeze.Scrollbar.effective_viewport_size(
+        config,
+        viewport_width,
+        viewport_height,
+        vertical?,
+        horizontal?
+      )
+
+    vertical? =
+      BackBreeze.Scrollbar.axis_enabled?(config, :vertical) and
+        BackBreeze.Scrollbar.visible?(config, :vertical, content_height, eff_viewport_height)
+
+    horizontal? =
+      BackBreeze.Scrollbar.axis_enabled?(config, :horizontal) and
+        BackBreeze.Scrollbar.visible?(config, :horizontal, content_width, eff_viewport_width)
+
+    {eff_viewport_width, eff_viewport_height} =
+      BackBreeze.Scrollbar.effective_viewport_size(
+        config,
+        viewport_width,
+        viewport_height,
+        vertical?,
+        horizontal?
+      )
+
+    {vertical?, horizontal?, eff_viewport_width, eff_viewport_height}
+  end
+
+  defp normalize_scroll({top, left}) do
+    top = if is_integer(top), do: max(top, 0), else: 0
+    left = if is_integer(left), do: max(left, 0), else: 0
+    {top, left}
+  end
+
+  defp normalize_scroll(_), do: {0, 0}
+
+  defp trim_axis_for_intersection(start_pos, end_pos, other_enabled?, other_placement) do
+    start_pos = if other_enabled? && other_placement == :start, do: start_pos + 1, else: start_pos
+    end_pos = if other_enabled? && other_placement == :end, do: end_pos - 1, else: end_pos
+
+    {start_pos, max(start_pos - 1, end_pos)}
+  end
+
+  defp clear_vertical_strip(layer_map, x, y_start, y_end) when y_start <= y_end do
+    Enum.reduce(y_start..y_end, layer_map, fn y, acc ->
+      Map.put(acc, {y, x}, {" ", ""})
+    end)
+  end
+
+  defp clear_vertical_strip(layer_map, _x, _y_start, _y_end), do: layer_map
+
+  defp clear_horizontal_strip(layer_map, y, x_start, x_end) when x_start <= x_end do
+    Enum.reduce(x_start..x_end, layer_map, fn x, acc ->
+      Map.put(acc, {y, x}, {" ", ""})
+    end)
+  end
+
+  defp clear_horizontal_strip(layer_map, _y, _x_start, _x_end), do: layer_map
+
+  defp draw_vertical_scrollbar(
+         layer_map,
+         config,
+         x,
+         y_start,
+         y_end,
+         scroll_top,
+         content_height,
+         viewport_height
+       ) do
+    total_size = y_end - y_start + 1
+
+    if total_size <= 0 do
       layer_map
     else
-      content_height = max(dimensions.content_height, viewport_height)
-      max_scroll = max(content_height - viewport_height, 0)
-      scroll_top = if is_integer(scroll_top), do: scroll_top, else: 0
-      scroll_top = min(max(scroll_top, 0), max_scroll)
+      {track_start, track_end, layer_map} =
+        maybe_draw_axis_arrows(
+          layer_map,
+          config.arrows,
+          total_size,
+          y_start,
+          y_end,
+          fn pos, acc -> put_segment(acc, {pos, x}, config.vertical.arrow_start) end,
+          fn pos, acc -> put_segment(acc, {pos, x}, config.vertical.arrow_end) end
+        )
 
-      thumb_height =
-        max(div(viewport_height * viewport_height, max(content_height, 1)), 1)
-        |> min(viewport_height)
+      draw_scroll_track_and_thumb(
+        layer_map,
+        :vertical,
+        config,
+        track_start,
+        track_end,
+        scroll_top,
+        content_height,
+        viewport_height,
+        fn pos, acc, segment -> put_segment(acc, {pos, x}, segment) end
+      )
+    end
+  end
 
-      thumb_top =
-        if max_scroll == 0 or viewport_height == thumb_height do
-          0
-        else
-          round(scroll_top * (viewport_height - thumb_height) / max_scroll)
-        end
+  defp draw_horizontal_scrollbar(
+         layer_map,
+         config,
+         y,
+         x_start,
+         x_end,
+         scroll_left,
+         content_width,
+         viewport_width
+       ) do
+    total_size = x_end - x_start + 1
 
-      track_range = top..bottom
-      thumb_range = (top + thumb_top)..(top + thumb_top + thumb_height - 1)
+    if total_size <= 0 do
+      layer_map
+    else
+      {track_start, track_end, layer_map} =
+        maybe_draw_axis_arrows(
+          layer_map,
+          config.arrows,
+          total_size,
+          x_start,
+          x_end,
+          fn pos, acc -> put_segment(acc, {y, pos}, config.horizontal.arrow_start) end,
+          fn pos, acc -> put_segment(acc, {y, pos}, config.horizontal.arrow_end) end
+        )
 
-      layer_map =
-        Enum.reduce(track_range, layer_map, fn y, acc ->
-          Map.put(acc, {y, right}, {"│", ""})
-        end)
+      draw_scroll_track_and_thumb(
+        layer_map,
+        :horizontal,
+        config,
+        track_start,
+        track_end,
+        scroll_left,
+        content_width,
+        viewport_width,
+        fn pos, acc, segment -> put_segment(acc, {y, pos}, segment) end
+      )
+    end
+  end
 
-      Enum.reduce(thumb_range, layer_map, fn y, acc ->
-        Map.put(acc, {y, right}, {"█", ""})
+  defp maybe_draw_axis_arrows(
+         layer_map,
+         true,
+         total_size,
+         start_pos,
+         end_pos,
+         draw_start,
+         draw_end
+       )
+       when total_size >= 3 do
+    layer_map = draw_start.(start_pos, layer_map)
+    layer_map = draw_end.(end_pos, layer_map)
+    {start_pos + 1, end_pos - 1, layer_map}
+  end
+
+  defp maybe_draw_axis_arrows(
+         layer_map,
+         _arrows,
+         _total_size,
+         start_pos,
+         end_pos,
+         _draw_start,
+         _draw_end
+       ) do
+    {start_pos, end_pos, layer_map}
+  end
+
+  defp draw_scroll_track_and_thumb(
+         layer_map,
+         axis,
+         config,
+         track_start,
+         track_end,
+         scroll_value,
+         content_size,
+         viewport_size,
+         put_fn
+       )
+       when track_start <= track_end and viewport_size > 0 do
+    track_size = track_end - track_start + 1
+
+    {track_segment, thumb_segment} =
+      case axis do
+        :vertical -> {config.vertical.track, config.vertical.thumb}
+        :horizontal -> {config.horizontal.track, config.horizontal.thumb}
+      end
+
+    max_scroll = max(content_size - viewport_size, 0)
+    scroll_value = min(max(scroll_value, 0), max_scroll)
+
+    thumb_size =
+      BackBreeze.Scrollbar.thumb_size(config, track_size, max(content_size, viewport_size))
+
+    thumb_start =
+      if max_scroll == 0 or thumb_size >= track_size do
+        track_start
+      else
+        offset = round(scroll_value * (track_size - thumb_size) / max_scroll)
+        track_start + offset
+      end
+
+    thumb_end = min(thumb_start + thumb_size - 1, track_end)
+
+    layer_map =
+      Enum.reduce(track_start..track_end, layer_map, fn pos, acc ->
+        put_fn.(pos, acc, track_segment)
       end)
+
+    Enum.reduce(thumb_start..thumb_end, layer_map, fn pos, acc ->
+      put_fn.(pos, acc, thumb_segment)
+    end)
+  end
+
+  defp draw_scroll_track_and_thumb(
+         layer_map,
+         _axis,
+         _config,
+         _track_start,
+         _track_end,
+         _scroll_value,
+         _content_size,
+         _viewport_size,
+         _put_fn
+       ),
+       do: layer_map
+
+  defp maybe_draw_intersection(layer_map, config, true, true, x, y) do
+    put_segment(layer_map, {y, x}, config.intersection)
+  end
+
+  defp maybe_draw_intersection(layer_map, _config, _vertical?, _horizontal?, _x, _y),
+    do: layer_map
+
+  defp put_segment(layer_map, _point, nil), do: layer_map
+
+  defp put_segment(layer_map, point, segment) do
+    char = BackBreeze.Scrollbar.segment_char(segment)
+
+    if is_binary(char) do
+      Map.put(layer_map, point, {char, BackBreeze.Scrollbar.style_sequence(segment)})
+    else
+      layer_map
     end
   end
 
@@ -537,6 +846,15 @@ defmodule BackBreeze.Box do
 
     {x + width, y, {map, false, seq}}
   end
+
+  defp raw_content_width(content) when is_binary(content) do
+    content
+    |> String.split("\n")
+    |> Enum.map(&BackBreeze.Utils.string_length/1)
+    |> Enum.max(fn -> 0 end)
+  end
+
+  defp raw_content_width(_), do: 0
 
   defp set_layer([], result, _layer) do
     Enum.reverse(result)

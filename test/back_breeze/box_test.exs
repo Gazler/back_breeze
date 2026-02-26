@@ -210,7 +210,7 @@ defmodule BackBreeze.BoxTest do
                """
                ┌──────┐
                │AAAAA█│
-               │BBBBB││
+               │BBBBB█│
                │CCCCC││
                └──────┘\
                """
@@ -232,7 +232,7 @@ defmodule BackBreeze.BoxTest do
                """
                ┌──────┐
                │DDDDD││
-               │EEEEE││
+               │EEEEE█│
                │FFFFF█│
                └──────┘\
                """
@@ -251,11 +251,154 @@ defmodule BackBreeze.BoxTest do
       assert rendered.content ==
                """
                ┌──────┐
-               │BBBBB││
+               │BBBBB█│
                │CCCCC█│
                │DDDDD││
                └──────┘\
                """
+    end
+
+    test "supports custom scrollbar chars and colors" do
+      child = BackBreeze.Box.new(content: "AAAAAA\nBBBBBB\nCCCCCC\nDDDDDD\nEEEEEE\nFFFFFF")
+
+      box =
+        BackBreeze.Box.new(
+          style: %{
+            border: :line,
+            width: 6,
+            height: 3,
+            overflow: :hidden,
+            scrollbar: %{
+              axis: :vertical,
+              thumb: %{char: "▓", foreground_color: 2, bold: true},
+              track: %{char: "·", foreground_color: 8}
+            }
+          },
+          children: [child]
+        )
+
+      rendered = BackBreeze.Box.render(box)
+
+      assert String.contains?(rendered.content, "\e[1;38;5;2m▓\e[0m")
+      assert String.contains?(rendered.content, "\e[38;5;8m·\e[0m")
+    end
+
+    test "supports start placement for vertical scrollbars" do
+      child = BackBreeze.Box.new(content: "AAAAAA\nBBBBBB\nCCCCCC\nDDDDDD\nEEEEEE\nFFFFFF")
+
+      box =
+        BackBreeze.Box.new(
+          style: %{
+            border: :line,
+            width: 6,
+            height: 3,
+            overflow: :hidden,
+            scrollbar: %{axis: :vertical, placement: :start}
+          },
+          children: [child]
+        )
+
+      rendered = BackBreeze.Box.render(box)
+
+      assert rendered.content ==
+               """
+               ┌──────┐
+               │█AAAAA│
+               │█BBBBB│
+               ││CCCCC│
+               └──────┘\
+               """
+    end
+
+    test "renders a horizontal scrollbar and thumb" do
+      child = BackBreeze.Box.new(content: "ABCDEFGHIJKL")
+
+      box =
+        BackBreeze.Box.new(
+          style: %{
+            border: :line,
+            width: 5,
+            height: 2,
+            overflow: :hidden,
+            scrollbar: %{axis: :horizontal}
+          },
+          children: [child]
+        )
+
+      rendered = BackBreeze.Box.render(box)
+
+      assert rendered.content ==
+               """
+               ┌─────┐
+               │ABCDE│
+               │██───│
+               └─────┘\
+               """
+    end
+
+    test "respects show: :never" do
+      child = BackBreeze.Box.new(content: "ABCDEFGHIJKL\nMNOPQRSTUVWX\nYZ0123456789")
+
+      box =
+        BackBreeze.Box.new(
+          style: %{
+            border: :line,
+            width: 6,
+            height: 3,
+            overflow: :hidden,
+            scrollbar: %{axis: :both, show: :never, thumb: %{char: "▓"}, track: %{char: "·"}}
+          },
+          children: [child]
+        )
+
+      rendered = BackBreeze.Box.render(box)
+
+      refute String.contains?(rendered.content, "▓")
+      refute String.contains?(rendered.content, "·")
+    end
+
+    test "supports show: :always for non-overflowing content" do
+      child = BackBreeze.Box.new(content: "ABC")
+
+      box =
+        BackBreeze.Box.new(
+          style: %{
+            border: :line,
+            width: 5,
+            height: 2,
+            overflow: :hidden,
+            scrollbar: %{axis: :vertical, show: :always}
+          },
+          children: [child]
+        )
+
+      rendered = BackBreeze.Box.render(box)
+      assert String.contains?(rendered.content, "█")
+    end
+
+    test "renders both scrollbars with arrows" do
+      child = BackBreeze.Box.new(content: "ABCDEFGHIJKL\nMNOPQRSTUVWX\nYZ0123456789\nabcdefghijk")
+
+      box =
+        BackBreeze.Box.new(
+          scroll: {1, 3},
+          style: %{
+            border: :line,
+            width: 6,
+            height: 4,
+            overflow: :hidden,
+            scrollbar: %{axis: :both, arrows: true}
+          },
+          children: [child]
+        )
+
+      rendered = BackBreeze.Box.render(box)
+
+      assert String.contains?(rendered.content, "▲")
+      assert String.contains?(rendered.content, "▼")
+      assert String.contains?(rendered.content, "◀")
+      assert String.contains?(rendered.content, "▶")
+      assert String.contains?(rendered.content, "┼")
     end
   end
 
