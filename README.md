@@ -39,8 +39,9 @@ BackBreeze.Box.new(
 Supported scrollbar shorthands remain available:
 `false | true | :vertical | :horizontal | :both`.
 
-By default, scrollbar thumbs are single-cell and in `:inset` mode they render on the
-border gutter when a border exists, preserving content columns.
+By default, scrollbar thumbs scale proportionally to viewport/content size. You can
+override with `sizing: {:fixed, n}` if you want fixed-size thumbs. In `:inset` mode,
+scrollbars render on the border gutter when a border exists, preserving content columns.
 
 ## Installation
 

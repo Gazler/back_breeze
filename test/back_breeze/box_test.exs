@@ -210,7 +210,7 @@ defmodule BackBreeze.BoxTest do
                """
                ┌──────┐
                │AAAAAA█
-               │BBBBBB│
+               │BBBBBB█
                │CCCCCC│
                └──────┘\
                """
@@ -232,7 +232,7 @@ defmodule BackBreeze.BoxTest do
                """
                ┌──────┐
                │DDDDDD│
-               │EEEEEE│
+               │EEEEEE█
                │FFFFFF█
                └──────┘\
                """
@@ -251,7 +251,7 @@ defmodule BackBreeze.BoxTest do
       assert rendered.content ==
                """
                ┌──────┐
-               │BBBBBB│
+               │BBBBBB█
                │CCCCCC█
                │DDDDDD│
                └──────┘\
@@ -304,7 +304,7 @@ defmodule BackBreeze.BoxTest do
                """
                ┌──────┐
                █AAAAAA│
-               │BBBBBB│
+               █BBBBBB│
                │CCCCCC│
                └──────┘\
                """
@@ -332,7 +332,49 @@ defmodule BackBreeze.BoxTest do
                ┌─────┐
                │ABCDE│
                │     │
-               └█────┘\
+               └██───┘\
+               """
+    end
+
+    test "scales thumb proportionally by default" do
+      child = BackBreeze.Box.new(content: "AAAAAA\nBBBBBB\nCCCCCC\nDDDDDD\nEEEEEE\nFFFFFF")
+
+      box =
+        BackBreeze.Box.new(
+          style: %{border: :line, width: 6, height: 3, overflow: :hidden, scrollbar: true},
+          children: [child]
+        )
+
+      rendered = BackBreeze.Box.render(box)
+
+      assert String.contains?(rendered.content, "│AAAAAA█")
+      assert String.contains?(rendered.content, "│BBBBBB█")
+    end
+
+    test "supports fixed thumb sizing override" do
+      child = BackBreeze.Box.new(content: "AAAAAA\nBBBBBB\nCCCCCC\nDDDDDD\nEEEEEE\nFFFFFF")
+
+      box =
+        BackBreeze.Box.new(
+          style: %{
+            border: :line,
+            width: 6,
+            height: 3,
+            overflow: :hidden,
+            scrollbar: %{axis: :vertical, sizing: {:fixed, 1}}
+          },
+          children: [child]
+        )
+
+      rendered = BackBreeze.Box.render(box)
+
+      assert rendered.content ==
+               """
+               ┌──────┐
+               │AAAAAA█
+               │BBBBBB│
+               │CCCCCC│
+               └──────┘\
                """
     end
 

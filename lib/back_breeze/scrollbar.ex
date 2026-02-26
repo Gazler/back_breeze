@@ -21,7 +21,7 @@ defmodule BackBreeze.Scrollbar do
             vertical_placement: nil,
             horizontal_placement: nil,
             min_thumb_size: 1,
-            sizing: {:fixed, 1},
+            sizing: :proportional,
             arrows: false,
             vertical: %{},
             horizontal: %{},
