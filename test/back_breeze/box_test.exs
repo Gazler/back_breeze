@@ -1,6 +1,34 @@
 defmodule BackBreeze.BoxTest do
   use ExUnit.Case, async: true
 
+  describe "render_with_dimensions/2" do
+    test "calculates nested dimensions" do
+      child = BackBreeze.Box.new(content: "Hello\nWorld", style: %{border: :line})
+      inner_box = BackBreeze.Box.new(children: [child, child], style: %{border: :line, height: 6})
+      box = BackBreeze.Box.new(children: [inner_box])
+      %{box: box, dimensions: dimensions} = BackBreeze.Box.render_with_dimensions(box)
+
+      assert box.content ==
+               """
+               ┌───────┐
+               │┌─────┐│
+               ││Hello││
+               ││World││
+               │└─────┘│
+               │┌─────┐│
+               ││Hello││
+               └───────┘\
+               """
+
+      assert dimensions == [
+               %{height: 8, content_height: 8, viewport_height: 8},
+               %{height: 8, content_height: 8, viewport_height: 6},
+               %{height: 4, content_height: 2, viewport_height: 2},
+               %{height: 4, content_height: 2, viewport_height: 2}
+             ]
+    end
+  end
+
   describe "render/1" do
     test "renders a single child" do
       child = BackBreeze.Box.new(content: "Hello", style: %{bold: true})
