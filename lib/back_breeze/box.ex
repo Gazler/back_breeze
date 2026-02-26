@@ -132,8 +132,23 @@ defmodule BackBreeze.Box do
 
     {layer_map, max_width, max_height} = generate_layer_map(content, %{}, 0, 0)
 
-    max_width = max(max_width, child_width)
-    max_height = max(max_height, child_height)
+    {_, offset_left} = box.scroll
+
+    child_layer_map =
+      if offset_left > 0 do
+        shift_layer_map(child_layer_map, -offset_left, 0)
+      else
+        child_layer_map
+      end
+
+    child_layer_map = clip_child_layer_map(child_layer_map, box.style, max_width, max_height)
+
+    {max_width, max_height} =
+      if box.style.overflow == :hidden do
+        {max_width, max_height}
+      else
+        {max(max_width, child_width), max(max_height, child_height)}
+      end
 
     reset = Termite.Style.reset_code()
 
@@ -366,6 +381,34 @@ defmodule BackBreeze.Box do
     {max_x, map} = Map.pop(acc, :max_x, 1)
 
     {map, max_x - 1, y}
+  end
+
+  defp clip_child_layer_map(layer_map, %{overflow: :hidden, border: border}, max_x, max_y)
+       when is_integer(max_x) and is_integer(max_y) do
+    left = if border.left, do: 1, else: 0
+    top = if border.top, do: 1, else: 0
+    right = max(max_x - if(border.right, do: 1, else: 0), left - 1)
+    bottom = max(max_y - if(border.bottom, do: 1, else: 0), top - 1)
+
+    Enum.reduce(layer_map, %{}, fn
+      {{y, x}, value}, acc when x >= left and x <= right and y >= top and y <= bottom ->
+        Map.put(acc, {y, x}, value)
+
+      _, acc ->
+        acc
+    end)
+  end
+
+  defp clip_child_layer_map(layer_map, _style, _width, _height), do: layer_map
+
+  defp shift_layer_map(layer_map, shift_x, shift_y) do
+    Enum.reduce(layer_map, %{}, fn
+      {{y, x}, value}, acc ->
+        Map.put(acc, {y + shift_y, x + shift_x}, value)
+
+      _, acc ->
+        acc
+    end)
   end
 
   defp add_layer_char(c, map, x, y, current_seq, seq) do
