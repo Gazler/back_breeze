@@ -81,7 +81,12 @@ defmodule BackBreeze.Style do
     width = if width == :auto, do: string_length, else: width
     width = if width == :screen, do: screen_width - 2, else: width
     height = if height == :screen, do: screen_height - 2, else: height
-    str = if string_length > width, do: BackBreeze.String.reflow(str, width), else: str
+    str =
+      cond do
+        string_length <= width -> str
+        overflow == :hidden && height == 0 -> BackBreeze.String.truncate(str, width)
+        true -> BackBreeze.String.reflow(str, width)
+      end
 
     termite_style = to_termite(style)
 

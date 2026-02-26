@@ -4,6 +4,24 @@ defmodule BackBreeze.String do
   alias BackBreeze.Ucwidth
   import BackBreeze.Utils, only: [string_length: 1]
 
+  def truncate(str, width) do
+    {result, _} =
+      str
+      |> String.graphemes()
+      |> Enum.reduce_while({"", 0}, fn char, {acc, cur_width} ->
+        char_width = Ucwidth.width(char)
+        next_width = cur_width + char_width
+
+        if next_width > width do
+          {:halt, {acc, cur_width}}
+        else
+          {:cont, {acc <> char, next_width}}
+        end
+      end)
+
+    result
+  end
+
   @whitespace [" "]
   def reflow(str, width, opts \\ []) do
     break = Keyword.get(opts, :break, :word)

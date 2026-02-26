@@ -117,6 +117,19 @@ defmodule BackBreeze.StyleTest do
                """
     end
 
+    test "truncates content with no height when overflow is hidden" do
+      content = String.duplicate("hello world ", 5)
+
+      style =
+        BackBreeze.Style.border()
+        |> BackBreeze.Style.width(10)
+        |> BackBreeze.Style.overflow(:hidden)
+
+      output = BackBreeze.Style.render(style, content)
+
+      assert output == "┌──────────┐\n│hello worl│\n└──────────┘"
+    end
+
     test "allows a top offset for scrolling" do
       content = for i <- 1..5, into: "", do: "Line #{i} "
 

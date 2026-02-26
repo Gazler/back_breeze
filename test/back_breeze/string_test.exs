@@ -62,6 +62,25 @@ defmodule BackBreeze.StringTest do
     end
   end
 
+  describe "truncate/2" do
+    test "truncates a string to the given width" do
+      assert BackBreeze.String.truncate("hello world", 5) == "hello"
+    end
+
+    test "does not truncate if the string fits within the width" do
+      assert BackBreeze.String.truncate("hello", 10) == "hello"
+    end
+
+    test "does not truncate if the string exactly fills the width" do
+      assert BackBreeze.String.truncate("hello", 5) == "hello"
+    end
+
+    test "accounts for wide characters" do
+      # 🍏 is 2 columns wide, so width 4 fits exactly 2
+      assert BackBreeze.String.truncate("🍏🍏🍏", 4) == "🍏🍏"
+    end
+  end
+
   describe "reflow/3 by char" do
     test "outputs a stream of characters broken by the width boundary" do
       string = String.duplicate("this is a variable length line ", 3)
