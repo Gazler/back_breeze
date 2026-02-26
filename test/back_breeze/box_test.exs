@@ -209,9 +209,9 @@ defmodule BackBreeze.BoxTest do
       assert rendered.content ==
                """
                ┌──────┐
-               │AAAAA█│
-               │BBBBB█│
-               │CCCCC││
+               │AAAAAA█
+               │BBBBBB│
+               │CCCCCC│
                └──────┘\
                """
     end
@@ -231,9 +231,9 @@ defmodule BackBreeze.BoxTest do
       assert rendered.content ==
                """
                ┌──────┐
-               │DDDDD││
-               │EEEEE█│
-               │FFFFF█│
+               │DDDDDD│
+               │EEEEEE│
+               │FFFFFF█
                └──────┘\
                """
     end
@@ -251,9 +251,9 @@ defmodule BackBreeze.BoxTest do
       assert rendered.content ==
                """
                ┌──────┐
-               │BBBBB█│
-               │CCCCC█│
-               │DDDDD││
+               │BBBBBB│
+               │CCCCCC█
+               │DDDDDD│
                └──────┘\
                """
     end
@@ -303,9 +303,9 @@ defmodule BackBreeze.BoxTest do
       assert rendered.content ==
                """
                ┌──────┐
-               │█AAAAA│
-               │█BBBBB│
-               ││CCCCC│
+               █AAAAAA│
+               │BBBBBB│
+               │CCCCCC│
                └──────┘\
                """
     end
@@ -331,8 +331,8 @@ defmodule BackBreeze.BoxTest do
                """
                ┌─────┐
                │ABCDE│
-               │██───│
-               └─────┘\
+               │     │
+               └█────┘\
                """
     end
 
@@ -374,6 +374,54 @@ defmodule BackBreeze.BoxTest do
 
       rendered = BackBreeze.Box.render(box)
       assert String.contains?(rendered.content, "█")
+    end
+
+    test "draws end scrollbar on border gutter for bordered containers" do
+      child = BackBreeze.Box.new(content: "ABCDEF")
+
+      box =
+        BackBreeze.Box.new(
+          style: %{
+            border: :line,
+            width: 6,
+            height: 1,
+            overflow: :hidden,
+            scrollbar: %{axis: :vertical, show: :always}
+          },
+          children: [child]
+        )
+
+      rendered = BackBreeze.Box.render(box)
+
+      assert rendered.content ==
+               """
+               ┌──────┐
+               │ABCDEF█
+               └──────┘\
+               """
+    end
+
+    test "scrollbar thumb reaches the bottom at max vertical scroll" do
+      content = Enum.map_join(1..30, "\n", fn i -> "L#{i}" end)
+
+      box =
+        BackBreeze.Box.new(
+          content: content,
+          scroll: {26, 0},
+          style: %{border: :line, width: 6, height: 4, overflow: :hidden, scrollbar: true}
+        )
+
+      rendered = BackBreeze.Box.render(box)
+
+      assert rendered.content ==
+               """
+               ┌──────┐
+               │L27   │
+               │L28   │
+               │L29   │
+               │L30   █
+               └──────┘\
+               """
     end
 
     test "renders both scrollbars with arrows" do

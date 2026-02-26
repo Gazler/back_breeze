@@ -469,8 +469,17 @@ defmodule BackBreeze.Box do
           vertical_placement = BackBreeze.Scrollbar.placement(config, :vertical)
           horizontal_placement = BackBreeze.Scrollbar.placement(config, :horizontal)
 
-          x_scrollbar = if vertical_placement == :start, do: left, else: right
-          y_scrollbar = if horizontal_placement == :start, do: top, else: bottom
+          {x_scrollbar, y_scrollbar} =
+            scrollbar_positions(
+              style.border,
+              config,
+              left,
+              top,
+              right,
+              bottom,
+              vertical_placement,
+              horizontal_placement
+            )
 
           {vertical_start, vertical_end} =
             trim_axis_for_intersection(top, bottom, horizontal?, horizontal_placement)
@@ -479,14 +488,16 @@ defmodule BackBreeze.Box do
             trim_axis_for_intersection(left, right, vertical?, vertical_placement)
 
           layer_map =
-            if config.mode == :inset and vertical? do
+            if config.mode == :inset and vertical? and x_scrollbar >= left and
+                 x_scrollbar <= right do
               clear_vertical_strip(layer_map, x_scrollbar, vertical_start, vertical_end)
             else
               layer_map
             end
 
           layer_map =
-            if config.mode == :inset and horizontal? do
+            if config.mode == :inset and horizontal? and y_scrollbar >= top and
+                 y_scrollbar <= bottom do
               clear_horizontal_strip(layer_map, y_scrollbar, horizontal_start, horizontal_end)
             else
               layer_map
@@ -546,6 +557,35 @@ defmodule BackBreeze.Box do
     bottom = max(max_y - if(border.bottom, do: 1, else: 0), top)
 
     {left, top, right, bottom}
+  end
+
+  defp scrollbar_positions(
+         border,
+         config,
+         left,
+         top,
+         right,
+         bottom,
+         vertical_placement,
+         horizontal_placement
+       ) do
+    x_scrollbar =
+      cond do
+        config.mode == :inset and vertical_placement == :start and border.left -> left - 1
+        config.mode == :inset and vertical_placement == :end and border.right -> right + 1
+        vertical_placement == :start -> left
+        true -> right
+      end
+
+    y_scrollbar =
+      cond do
+        config.mode == :inset and horizontal_placement == :start and border.top -> top - 1
+        config.mode == :inset and horizontal_placement == :end and border.bottom -> bottom + 1
+        horizontal_placement == :start -> top
+        true -> bottom
+      end
+
+    {x_scrollbar, y_scrollbar}
   end
 
   defp resolve_visible_axes(

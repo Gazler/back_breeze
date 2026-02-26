@@ -39,6 +39,9 @@ BackBreeze.Box.new(
 Supported scrollbar shorthands remain available:
 `false | true | :vertical | :horizontal | :both`.
 
+By default, scrollbar thumbs are single-cell and in `:inset` mode they render on the
+border gutter when a border exists, preserving content columns.
+
 ## Installation
 
 He package can be installed by adding `back_breeze` to your list of dependencies in `mix.exs`:
