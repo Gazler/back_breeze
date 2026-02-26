@@ -43,3 +43,14 @@ child =
 box = BackBreeze.Box.new(style: %{border: :line}, children: [child]) |> BackBreeze.Box.render()
 
 IO.puts(box.content)
+
+child =
+  BackBreeze.Box.new(%{
+    style: %{border: :line, width: 30, height: 5, overflow: :hidden, scrollbar: true},
+    scroll: {2, 0},
+    content: "3 box WITH SCROLLBAR #{content}"
+  })
+
+box = BackBreeze.Box.new(style: %{border: :line}, children: [child]) |> BackBreeze.Box.render()
+
+IO.puts(box.content)

@@ -83,7 +83,36 @@ defmodule BackBreeze.Box do
 
   defp render_and_calc(%{box: %{children: []} = box} = acc, opts) do
     {content, dimensions, width} = render_self(box, opts)
-    box = %{box | content: content, width: width, state: :rendered, children: []}
+
+    {content, width, layer_map} =
+      if vertical_scrollbar?(box.style, dimensions) do
+        {layer_map, max_width, max_height} = generate_layer_map(content, %{}, 0, 0)
+
+        layer_map =
+          maybe_add_scrollbars(
+            layer_map,
+            box.style,
+            box.scroll,
+            dimensions,
+            max_width,
+            max_height
+          )
+
+        {layer_maps_to_content(layer_map, %{}, 0, 0, max_width, max_height), max_width + 1,
+         layer_map}
+      else
+        {content, width, %{}}
+      end
+
+    box = %{
+      box
+      | content: content,
+        width: width,
+        state: :rendered,
+        children: [],
+        layer_map: layer_map
+    }
+
     %{acc | box: box, dimensions: [{acc.id, dimensions} | acc.dimensions], id: acc.id + 1}
   end
 
@@ -116,13 +145,17 @@ defmodule BackBreeze.Box do
       render_self(%{box | width: width, height: height, style: style, scroll: {0, 0}}, opts)
 
     border_rows =
-      (if box.style.border.top, do: 1, else: 0) +
-        (if box.style.border.bottom, do: 1, else: 0)
+      if(box.style.border.top, do: 1, else: 0) +
+        if box.style.border.bottom, do: 1, else: 0
 
     dimensions =
       Enum.take(acc.dimensions, child_length)
       |> Enum.reduce(
-        %{content_height: 0, viewport_height: dimensions.height - border_rows, height: dimensions.height},
+        %{
+          content_height: 0,
+          viewport_height: dimensions.height - border_rows,
+          height: dimensions.height
+        },
         fn {_, dims}, acc ->
           %{acc | content_height: dims.height + acc.content_height}
         end
@@ -150,7 +183,15 @@ defmodule BackBreeze.Box do
         {max(max_width, child_width), max(max_height, child_height)}
       end
 
-    reset = Termite.Style.reset_code()
+    child_layer_map =
+      maybe_add_scrollbars(
+        child_layer_map,
+        box.style,
+        box.scroll,
+        dimensions,
+        max_width,
+        max_height
+      )
 
     {start_x, start_y} =
       case box do
@@ -158,45 +199,8 @@ defmodule BackBreeze.Box do
         _ -> {0, 0}
       end
 
-    y_range = start_y..max_height
-    x_range = start_x..max_width
-
     content =
-      Enum.map(y_range, fn y ->
-        {content, buffer, style, _} =
-          Enum.reduce(x_range, {"", "", "", false}, fn x, {acc, buffer, last_style, skip} ->
-            child_point = Map.get(child_layer_map, {y, x})
-
-            point =
-              if skip do
-                child_point
-              else
-                child_point || Map.get(layer_map, {y, x})
-              end
-
-            skip_next =
-              case child_point do
-                {char, _} -> Ucwidth.width(char) == 2
-                _ -> false
-              end
-
-            case {point, buffer, last_style} do
-              {nil, _, _} -> {acc, buffer, last_style, skip_next}
-              {{char, style}, _, style} -> {acc, buffer <> char, style, skip_next}
-              {{char, style}, _, ""} -> {acc <> buffer, char, style, skip_next}
-              {{char, style}, _, last} -> {acc <> last <> buffer <> reset, char, style, skip_next}
-            end
-          end)
-
-        case {buffer, style} do
-          {"", _} -> content
-          {_, nil} -> content <> buffer
-          {_, ""} -> content <> buffer
-          {_, style} -> content <> style <> buffer <> reset
-        end
-      end)
-
-    content = Enum.join(content, "\n") |> String.trim_trailing("\n")
+      layer_maps_to_content(layer_map, child_layer_map, start_x, start_y, max_width, max_height)
 
     box = %{
       box
@@ -381,6 +385,118 @@ defmodule BackBreeze.Box do
     {max_x, map} = Map.pop(acc, :max_x, 1)
 
     {map, max_x - 1, y}
+  end
+
+  defp layer_maps_to_content(layer_map, overlay_layer_map, start_x, start_y, max_x, max_y) do
+    reset = Termite.Style.reset_code()
+    y_range = start_y..max_y
+    x_range = start_x..max_x
+
+    content =
+      Enum.map(y_range, fn y ->
+        {content, buffer, style, _} =
+          Enum.reduce(x_range, {"", "", "", false}, fn x, {acc, buffer, last_style, skip} ->
+            overlay_point = Map.get(overlay_layer_map, {y, x})
+
+            point =
+              if skip do
+                overlay_point
+              else
+                overlay_point || Map.get(layer_map, {y, x})
+              end
+
+            skip_next =
+              case overlay_point do
+                {char, _} -> Ucwidth.width(char) == 2
+                _ -> false
+              end
+
+            case {point, buffer, last_style} do
+              {nil, _, _} -> {acc, buffer, last_style, skip_next}
+              {{char, style}, _, style} -> {acc, buffer <> char, style, skip_next}
+              {{char, style}, _, ""} -> {acc <> buffer, char, style, skip_next}
+              {{char, style}, _, last} -> {acc <> last <> buffer <> reset, char, style, skip_next}
+            end
+          end)
+
+        case {buffer, style} do
+          {"", _} -> content
+          {_, nil} -> content <> buffer
+          {_, ""} -> content <> buffer
+          {_, style} -> content <> style <> buffer <> reset
+        end
+      end)
+
+    Enum.join(content, "\n") |> String.trim_trailing("\n")
+  end
+
+  defp maybe_add_scrollbars(layer_map, style, scroll, dimensions, max_x, max_y) do
+    if vertical_scrollbar?(style, dimensions) do
+      add_vertical_scrollbar(layer_map, style, scroll, dimensions, max_x, max_y)
+    else
+      layer_map
+    end
+  end
+
+  defp vertical_scrollbar?(
+         %{overflow: :hidden, scrollbar: scrollbar},
+         %{content_height: content_height, viewport_height: viewport_height}
+       )
+       when scrollbar in [true, :vertical, :both] and is_integer(content_height) and
+              is_integer(viewport_height) do
+    content_height > viewport_height and viewport_height > 0
+  end
+
+  defp vertical_scrollbar?(_style, _dimensions), do: false
+
+  defp add_vertical_scrollbar(
+         layer_map,
+         %{border: border},
+         {scroll_top, _},
+         dimensions,
+         max_x,
+         max_y
+       )
+       when is_integer(max_x) and is_integer(max_y) do
+    left = if border.left, do: 1, else: 0
+    top = if border.top, do: 1, else: 0
+
+    right = max(max_x - if(border.right, do: 1, else: 0), left)
+    bottom = max(max_y - if(border.bottom, do: 1, else: 0), top)
+
+    viewport_height = bottom - top + 1
+
+    if viewport_height <= 0 or max_x < left or max_y < top do
+      layer_map
+    else
+      content_height = max(dimensions.content_height, viewport_height)
+      max_scroll = max(content_height - viewport_height, 0)
+      scroll_top = if is_integer(scroll_top), do: scroll_top, else: 0
+      scroll_top = min(max(scroll_top, 0), max_scroll)
+
+      thumb_height =
+        max(div(viewport_height * viewport_height, max(content_height, 1)), 1)
+        |> min(viewport_height)
+
+      thumb_top =
+        if max_scroll == 0 or viewport_height == thumb_height do
+          0
+        else
+          round(scroll_top * (viewport_height - thumb_height) / max_scroll)
+        end
+
+      track_range = top..bottom
+      thumb_range = (top + thumb_top)..(top + thumb_top + thumb_height - 1)
+
+      layer_map =
+        Enum.reduce(track_range, layer_map, fn y, acc ->
+          Map.put(acc, {y, right}, {"│", ""})
+        end)
+
+      Enum.reduce(thumb_range, layer_map, fn y, acc ->
+        Map.put(acc, {y, right}, {"█", ""})
+      end)
+    end
   end
 
   defp clip_child_layer_map(layer_map, %{overflow: :hidden, border: border}, max_x, max_y)

@@ -194,6 +194,69 @@ defmodule BackBreeze.BoxTest do
                └────────┘\
                """
     end
+
+    test "renders a vertical scrollbar for overflowing child content" do
+      child = BackBreeze.Box.new(content: "AAAAAA\nBBBBBB\nCCCCCC\nDDDDDD\nEEEEEE\nFFFFFF")
+
+      box =
+        BackBreeze.Box.new(
+          style: %{border: :line, width: 6, height: 3, overflow: :hidden, scrollbar: true},
+          children: [child]
+        )
+
+      rendered = BackBreeze.Box.render(box)
+
+      assert rendered.content ==
+               """
+               ┌──────┐
+               │AAAAA█│
+               │BBBBB││
+               │CCCCC││
+               └──────┘\
+               """
+    end
+
+    test "moves scrollbar thumb based on vertical scroll offset" do
+      child = BackBreeze.Box.new(content: "AAAAAA\nBBBBBB\nCCCCCC\nDDDDDD\nEEEEEE\nFFFFFF")
+
+      box =
+        BackBreeze.Box.new(
+          scroll: {3, 0},
+          style: %{border: :line, width: 6, height: 3, overflow: :hidden, scrollbar: true},
+          children: [child]
+        )
+
+      rendered = BackBreeze.Box.render(box)
+
+      assert rendered.content ==
+               """
+               ┌──────┐
+               │DDDDD││
+               │EEEEE││
+               │FFFFF█│
+               └──────┘\
+               """
+    end
+
+    test "renders a vertical scrollbar for overflowing leaf content" do
+      box =
+        BackBreeze.Box.new(
+          content: "AAAAAA\nBBBBBB\nCCCCCC\nDDDDDD\nEEEEEE\nFFFFFF",
+          scroll: {1, 0},
+          style: %{border: :line, width: 6, height: 3, overflow: :hidden, scrollbar: true}
+        )
+
+      rendered = BackBreeze.Box.render(box)
+
+      assert rendered.content ==
+               """
+               ┌──────┐
+               │BBBBB││
+               │CCCCC█│
+               │DDDDD││
+               └──────┘\
+               """
+    end
   end
 
   describe "join_vertical/2" do

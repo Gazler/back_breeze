@@ -7,6 +7,7 @@ A terminal layout rendering library built on top of [Termite](https://github.com
  * ANSI colors and text styling
  * text reflowing/overflow
  * text offsets to allow for scrolling
+ * optional viewport scrollbars for overflow-hidden regions
  * joining text horizontally/vertically
  * grid based rendering
  * absolute positioning
