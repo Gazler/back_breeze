@@ -13,6 +13,16 @@ defmodule BackBreeze.Scrollbar do
               style: ""
   end
 
+  defmodule AxisSegmentsContext do
+    @moduledoc false
+
+    defstruct base: %{},
+              common_thumb: %{},
+              common_track: %{},
+              overrides: %{},
+              fallback_color: nil
+  end
+
   defstruct enabled: false,
             axis: :vertical,
             show: :auto,
@@ -80,6 +90,7 @@ defmodule BackBreeze.Scrollbar do
       |> Map.get(:horizontal_placement)
       |> normalize_optional_placement()
 
+    fallback_color = Map.get(style, :border_color)
     common_thumb = Map.get(map, :thumb, %{})
     common_track = Map.get(map, :track, %{})
 
@@ -87,26 +98,26 @@ defmodule BackBreeze.Scrollbar do
     horizontal_overrides = Map.get(map, :horizontal, %{})
 
     vertical =
-      normalize_axis_segments(
-        base.vertical,
-        common_thumb,
-        common_track,
-        vertical_overrides,
-        Map.get(style, :border_color)
-      )
+      normalize_axis_segments(%AxisSegmentsContext{
+        base: base.vertical,
+        common_thumb: common_thumb,
+        common_track: common_track,
+        overrides: vertical_overrides,
+        fallback_color: fallback_color
+      })
 
     horizontal =
-      normalize_axis_segments(
-        base.horizontal,
-        common_thumb,
-        common_track,
-        horizontal_overrides,
-        Map.get(style, :border_color)
-      )
+      normalize_axis_segments(%AxisSegmentsContext{
+        base: base.horizontal,
+        common_thumb: common_thumb,
+        common_track: common_track,
+        overrides: horizontal_overrides,
+        fallback_color: fallback_color
+      })
 
     intersection =
       base.intersection
-      |> merge_segment(Map.get(map, :intersection, %{}), Map.get(style, :border_color))
+      |> merge_segment(Map.get(map, :intersection, %{}), fallback_color)
       |> segment_to_renderable()
 
     %__MODULE__{
@@ -147,14 +158,26 @@ defmodule BackBreeze.Scrollbar do
 
   @spec effective_viewport_size(t(), non_neg_integer(), non_neg_integer(), boolean(), boolean()) ::
           {non_neg_integer(), non_neg_integer()}
-  def effective_viewport_size(%__MODULE__{mode: :inset}, width, height, vertical?, horizontal?) do
+  def effective_viewport_size(%__MODULE__{} = config, width, height, vertical?, horizontal?) do
+    effective_viewport_size(config, %{
+      width: width,
+      height: height,
+      vertical?: vertical?,
+      horizontal?: horizontal?
+    })
+  end
+
+  @spec effective_viewport_size(t(), map()) :: {non_neg_integer(), non_neg_integer()}
+  def effective_viewport_size(
+        %__MODULE__{mode: :inset},
+        %{width: width, height: height, vertical?: vertical?, horizontal?: horizontal?}
+      ) do
     width = if vertical?, do: max(width - 1, 0), else: width
     height = if horizontal?, do: max(height - 1, 0), else: height
     {width, height}
   end
 
-  def effective_viewport_size(_config, width, height, _vertical?, _horizontal?),
-    do: {width, height}
+  def effective_viewport_size(_config, %{width: width, height: height}), do: {width, height}
 
   @spec placement(t(), :vertical | :horizontal) :: :start | :end
   def placement(%__MODULE__{} = config, :vertical),
@@ -258,7 +281,15 @@ defmodule BackBreeze.Scrollbar do
 
   defp normalize_int(_value, default), do: default
 
-  defp normalize_axis_segments(base, common_thumb, common_track, overrides, fallback_color) do
+  defp normalize_axis_segments(%AxisSegmentsContext{
+         base: base,
+         common_thumb: common_thumb,
+         common_track: common_track,
+         overrides: overrides,
+         fallback_color: fallback_color
+       }) do
+    overrides = if is_map(overrides), do: overrides, else: %{}
+
     thumb =
       base.thumb
       |> merge_segment(common_thumb, fallback_color)
