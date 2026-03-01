@@ -96,4 +96,10 @@ defmodule BackBreeze.StringTest do
              """
     end
   end
+
+  describe "reflow/3 with ANSI escape sequences" do
+    test "wraps by visible width, ignoring escape sequence characters" do
+      assert BackBreeze.String.reflow("\e[31mhello\e[0m world", 5) == "\e[31mhello\e[0m\nworld"
+    end
+  end
 end
