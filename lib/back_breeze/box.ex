@@ -156,15 +156,16 @@ defmodule BackBreeze.Box do
         if box.style.border.bottom, do: 1, else: 0
 
     dimensions =
-      Enum.take(acc.dimensions, child_length)
+      Enum.zip(Enum.reverse(box.children), Enum.take(acc.dimensions, child_length))
       |> Enum.reduce(
         %{
           content_height: 0,
           viewport_height: dimensions.height - border_rows,
           height: dimensions.height
         },
-        fn {_, dims}, acc ->
-          %{acc | content_height: dims.height + acc.content_height}
+        fn
+          {%{position: :absolute}, _}, acc -> acc
+          {_, {_, dims}}, acc -> %{acc | content_height: dims.height + acc.content_height}
         end
       )
 

@@ -553,6 +553,34 @@ defmodule BackBreeze.BoxTest do
       assert String.contains?(rendered.content, "\e[38;5;2m███\e[0m")
       assert String.contains?(rendered.content, "\e[38;5;8m──\e[0m")
     end
+
+    test "scrollbar thumb reaches the bottom with absolute-positioned siblings" do
+      absolute_child = BackBreeze.Box.new(content: "x", position: :absolute, left: 1, top: 0)
+
+      relative_children = Enum.map(~w(A B C D E F G H I), &BackBreeze.Box.new(content: &1))
+
+      box =
+        BackBreeze.Box.new(
+          scroll: {2, 0},
+          style: %{border: :line, width: 1, height: 7, overflow: :hidden, scrollbar: true},
+          children: [absolute_child | relative_children]
+        )
+
+      rendered = BackBreeze.Box.render(box)
+
+      assert rendered.content ==
+               """
+               ┌─┐
+               │C│
+               │D│
+               │E█
+               │F█
+               │G█
+               │H█
+               │I█
+               └─┘\
+               """
+    end
   end
 
   describe "join_vertical/2" do
