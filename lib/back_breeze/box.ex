@@ -13,10 +13,10 @@ defmodule BackBreeze.Box do
             height: nil,
             state: :ready,
             position: :relative,
-            display: :block,
             left: nil,
-            scroll: {0, 0},
             top: nil,
+            display: :block,
+            scroll: {0, 0},
             layer: 0,
             layer_map: %{}
 
@@ -42,6 +42,7 @@ defmodule BackBreeze.Box do
       end
 
     style = struct(BackBreeze.Style, style)
+
     struct(BackBreeze.Box, Map.put(map, :style, style))
   end
 
@@ -83,7 +84,42 @@ defmodule BackBreeze.Box do
 
   defp render_and_calc(%{box: %{children: []} = box} = acc, opts) do
     {content, dimensions, width} = render_self(box, opts)
-    box = %{box | content: content, width: width, state: :rendered, children: []}
+
+    scrollbar_config = BackBreeze.Scrollbar.normalize(box.style.scrollbar, box.style)
+
+    {content, width, layer_map} =
+      if box.style.overflow == :hidden and scrollbar_config.enabled do
+        {layer_map, max_width, max_height} = generate_layer_map(content, %{}, 0, 0)
+
+        layer_map =
+          BackBreeze.Scrollbar.add_to_layer_map(layer_map, %{
+            style: box.style,
+            scroll: box.scroll,
+            content_height: dimensions.content_height,
+            content_width: raw_content_width(box.content),
+            max_x: max_width,
+            max_y: max_height
+          })
+
+        {layer_maps_to_content(layer_map, %{}, %{
+           start_x: 0,
+           start_y: 0,
+           max_x: max_width,
+           max_y: max_height
+         }), max_width + 1, layer_map}
+      else
+        {content, width, %{}}
+      end
+
+    box = %{
+      box
+      | content: content,
+        width: width,
+        state: :rendered,
+        children: [],
+        layer_map: layer_map
+    }
+
     %{acc | box: box, dimensions: [{acc.id, dimensions} | acc.dimensions], id: acc.id + 1}
   end
 
@@ -116,13 +152,17 @@ defmodule BackBreeze.Box do
       render_self(%{box | width: width, height: height, style: style, scroll: {0, 0}}, opts)
 
     border_rows =
-      (if box.style.border.top, do: 1, else: 0) +
-        (if box.style.border.bottom, do: 1, else: 0)
+      if(box.style.border.top, do: 1, else: 0) +
+        if box.style.border.bottom, do: 1, else: 0
 
     dimensions =
       Enum.take(acc.dimensions, child_length)
       |> Enum.reduce(
-        %{content_height: 0, viewport_height: dimensions.height - border_rows, height: dimensions.height},
+        %{
+          content_height: 0,
+          viewport_height: dimensions.height - border_rows,
+          height: dimensions.height
+        },
         fn {_, dims}, acc ->
           %{acc | content_height: dims.height + acc.content_height}
         end
@@ -150,53 +190,29 @@ defmodule BackBreeze.Box do
         {max(max_width, child_width), max(max_height, child_height)}
       end
 
-    reset = Termite.Style.reset_code()
+    child_layer_map =
+      BackBreeze.Scrollbar.add_to_layer_map(child_layer_map, %{
+        style: box.style,
+        scroll: box.scroll,
+        content_height: dimensions.content_height,
+        content_width: child_width,
+        max_x: max_width,
+        max_y: max_height
+      })
 
     {start_x, start_y} =
-      case box do
-        %{position: :absolute, left: left, top: top} -> {left, top}
+      case box.position do
+        :absolute -> {box.left, box.top}
         _ -> {0, 0}
       end
 
-    y_range = start_y..max_height
-    x_range = start_x..max_width
-
     content =
-      Enum.map(y_range, fn y ->
-        {content, buffer, style, _} =
-          Enum.reduce(x_range, {"", "", "", false}, fn x, {acc, buffer, last_style, skip} ->
-            child_point = Map.get(child_layer_map, {y, x})
-
-            point =
-              if skip do
-                child_point
-              else
-                child_point || Map.get(layer_map, {y, x})
-              end
-
-            skip_next =
-              case child_point do
-                {char, _} -> Ucwidth.width(char) == 2
-                _ -> false
-              end
-
-            case {point, buffer, last_style} do
-              {nil, _, _} -> {acc, buffer, last_style, skip_next}
-              {{char, style}, _, style} -> {acc, buffer <> char, style, skip_next}
-              {{char, style}, _, ""} -> {acc <> buffer, char, style, skip_next}
-              {{char, style}, _, last} -> {acc <> last <> buffer <> reset, char, style, skip_next}
-            end
-          end)
-
-        case {buffer, style} do
-          {"", _} -> content
-          {_, nil} -> content <> buffer
-          {_, ""} -> content <> buffer
-          {_, style} -> content <> style <> buffer <> reset
-        end
-      end)
-
-    content = Enum.join(content, "\n") |> String.trim_trailing("\n")
+      layer_maps_to_content(layer_map, child_layer_map, %{
+        start_x: start_x,
+        start_y: start_y,
+        max_x: max_width,
+        max_y: max_height
+      })
 
     box = %{
       box
@@ -383,6 +399,53 @@ defmodule BackBreeze.Box do
     {map, max_x - 1, y}
   end
 
+  defp layer_maps_to_content(layer_map, overlay_layer_map, %{
+         start_x: start_x,
+         start_y: start_y,
+         max_x: max_x,
+         max_y: max_y
+       }) do
+    reset = Termite.Style.reset_code()
+
+    content =
+      Enum.map(start_y..max_y, fn y ->
+        {content, buffer, style, _} =
+          Enum.reduce(start_x..max_x, {"", "", "", false}, fn x,
+                                                              {acc, buffer, last_style, skip} ->
+            overlay_point = Map.get(overlay_layer_map, {y, x})
+
+            point =
+              if skip do
+                overlay_point
+              else
+                overlay_point || Map.get(layer_map, {y, x})
+              end
+
+            skip_next =
+              case overlay_point do
+                {char, _} -> Ucwidth.width(char) == 2
+                _ -> false
+              end
+
+            case {point, buffer, last_style} do
+              {nil, _, _} -> {acc, buffer, last_style, skip_next}
+              {{char, style}, _, style} -> {acc, buffer <> char, style, skip_next}
+              {{char, style}, _, ""} -> {acc <> buffer, char, style, skip_next}
+              {{char, style}, _, last} -> {acc <> last <> buffer <> reset, char, style, skip_next}
+            end
+          end)
+
+        case {buffer, style} do
+          {"", _} -> content
+          {_, nil} -> content <> buffer
+          {_, ""} -> content <> buffer
+          {_, style} -> content <> style <> buffer <> reset
+        end
+      end)
+
+    Enum.join(content, "\n") |> String.trim_trailing("\n")
+  end
+
   defp clip_child_layer_map(layer_map, %{overflow: :hidden, border: border}, max_x, max_y)
        when is_integer(max_x) and is_integer(max_y) do
     left = if border.left, do: 1, else: 0
@@ -421,6 +484,15 @@ defmodule BackBreeze.Box do
 
     {x + width, y, {map, false, seq}}
   end
+
+  defp raw_content_width(content) when is_binary(content) do
+    content
+    |> String.split("\n")
+    |> Enum.map(&BackBreeze.Utils.string_length/1)
+    |> Enum.max(fn -> 0 end)
+  end
+
+  defp raw_content_width(_), do: 0
 
   defp set_layer([], result, _layer) do
     Enum.reverse(result)

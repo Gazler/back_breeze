@@ -12,6 +12,7 @@ defmodule BackBreeze.Style do
             width: :auto,
             height: 0,
             overflow: :auto,
+            scrollbar: false,
             border_color: nil,
             foreground_color: nil,
             background_color: nil
@@ -57,6 +58,22 @@ defmodule BackBreeze.Style do
     %{style | overflow: overflow}
   end
 
+  @scrollbars [false, true, :vertical, :horizontal, :both]
+
+  def scrollbar(style \\ %Style{}, scrollbar \\ true)
+
+  def scrollbar(style, scrollbar) when scrollbar in @scrollbars do
+    %{style | scrollbar: scrollbar}
+  end
+
+  def scrollbar(style, scrollbar) when is_map(scrollbar) do
+    %{style | scrollbar: scrollbar}
+  end
+
+  def scrollbar(style, %BackBreeze.Scrollbar{} = scrollbar) do
+    %{style | scrollbar: scrollbar}
+  end
+
   def foreground_color(style \\ %Style{}, color) do
     %{style | foreground_color: color}
   end
@@ -81,6 +98,7 @@ defmodule BackBreeze.Style do
     width = if width == :auto, do: string_length, else: width
     width = if width == :screen, do: screen_width - 2, else: width
     height = if height == :screen, do: screen_height - 2, else: height
+
     str =
       cond do
         string_length <= width -> str

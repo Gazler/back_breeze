@@ -15,6 +15,24 @@ defmodule BackBreeze.StyleTest do
       assert style.foreground_color == 3
     end
 
+    test "supports scrollbar style values" do
+      assert BackBreeze.Style.scrollbar().scrollbar == true
+      assert BackBreeze.Style.scrollbar(%BackBreeze.Style{}, :vertical).scrollbar == :vertical
+      assert BackBreeze.Style.scrollbar(%BackBreeze.Style{}, :horizontal).scrollbar == :horizontal
+      assert BackBreeze.Style.scrollbar(%BackBreeze.Style{}, :both).scrollbar == :both
+      assert BackBreeze.Style.scrollbar(%BackBreeze.Style{}, false).scrollbar == false
+
+      style =
+        BackBreeze.Style.scrollbar(%BackBreeze.Style{}, %{
+          axis: :both,
+          thumb: %{char: "▓", foreground_color: 2},
+          track: %{char: "·", foreground_color: 8}
+        })
+
+      assert is_map(style.scrollbar)
+      assert style.scrollbar.axis == :both
+    end
+
     test "outputting the styles" do
       style =
         BackBreeze.Style.bold()
