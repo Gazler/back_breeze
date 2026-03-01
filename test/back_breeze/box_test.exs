@@ -581,6 +581,43 @@ defmodule BackBreeze.BoxTest do
                └─┘\
                """
     end
+
+    test "supports colored arrows via arrows config map" do
+      child = BackBreeze.Box.new(content: Enum.map_join(1..8, "\n", fn _ -> "ABCDEFGHIJKL" end))
+
+      box =
+        BackBreeze.Box.new(
+          scroll: {1, 3},
+          style: %{
+            border: :line,
+            width: 6,
+            height: 4,
+            overflow: :hidden,
+            scrollbar: %{axis: :both, arrows: %{foreground_color: 2}}
+          },
+          children: [child]
+        )
+
+      rendered = BackBreeze.Box.render(box)
+      assert String.contains?(rendered.content, "\e[38;5;2m▲")
+      assert String.contains?(rendered.content, "\e[38;5;2m▼")
+      assert String.contains?(rendered.content, "\e[38;5;2m◀")
+      assert String.contains?(rendered.content, "\e[38;5;2m▶")
+    end
+
+    test "scrollbar inherits border_color for track and thumb" do
+      children = Enum.map(1..6, &BackBreeze.Box.new(content: "Line #{&1}"))
+
+      box =
+        BackBreeze.Box.new(
+          style: %{border: :line, border_color: 3, width: 8, height: 3, overflow: :hidden, scrollbar: true},
+          children: children
+        )
+
+      rendered = BackBreeze.Box.render(box)
+      assert String.contains?(rendered.content, "\e[38;5;3m│")
+      assert String.contains?(rendered.content, "\e[38;5;3m█")
+    end
   end
 
   describe "join_vertical/2" do

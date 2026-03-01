@@ -77,36 +77,45 @@ defmodule BackBreeze.Scrollbar do
 
   @axes [:vertical, :horizontal, :both]
 
-  @spec normalize(term(), map()) :: t()
+  @spec normalize(term(), map()) :: {t(), map()}
   def normalize(value, style \\ %BackBreeze.Style{})
 
   def normalize(nil, style), do: normalize(false, style)
 
-  def normalize(false, _style), do: %__MODULE__{enabled: false}
+  def normalize(false, style), do: {%__MODULE__{enabled: false}, style}
 
   def normalize(true, style) do
-    default(style)
-    |> Map.put(:enabled, true)
+    scrollbar = default(style) |> Map.put(:enabled, true)
+    {scrollbar, style}
   end
 
   def normalize(axis, style) when axis in @axes do
-    default(style)
-    |> Map.merge(%{enabled: true, axis: axis})
+    scrollbar = default(style) |> Map.merge(%{enabled: true, axis: axis})
+    {scrollbar, style}
   end
 
-  def normalize(%__MODULE__{} = scrollbar, _style), do: scrollbar
+  def normalize(%__MODULE__{} = scrollbar, style), do: {scrollbar, style}
 
   def normalize(map, style) when is_map(map) do
-    base = default(style)
+    {base, style} = default(map, style)
     fallback_color = Map.get(style, :border_color)
     common_thumb = Map.get(map, :thumb, %{})
     common_track = Map.get(map, :track, %{})
+
+    arrows =
+      case Map.get(map, :arrows, false) do
+        true -> %{}
+        other -> other
+      end
+
+    common_arrows = if is_map(arrows), do: arrows, else: %{}
 
     vertical =
       build_axis_segments(
         base.vertical,
         common_thumb,
         common_track,
+        common_arrows,
         Map.get(map, :vertical, %{}),
         fallback_color
       )
@@ -116,6 +125,7 @@ defmodule BackBreeze.Scrollbar do
         base.horizontal,
         common_thumb,
         common_track,
+        common_arrows,
         Map.get(map, :horizontal, %{}),
         fallback_color
       )
@@ -125,15 +135,19 @@ defmodule BackBreeze.Scrollbar do
       |> merge_segment(Map.get(map, :intersection, %{}), fallback_color)
       |> segment_to_renderable()
 
-    struct(
-      base,
-      Map.merge(map, %{
-        enabled: true,
-        vertical: vertical,
-        horizontal: horizontal,
-        intersection: intersection
-      })
-    )
+    scrollbar =
+      struct(
+        base,
+        Map.merge(map, %{
+          enabled: true,
+          arrows: arrows,
+          vertical: vertical,
+          horizontal: horizontal,
+          intersection: intersection
+        })
+      )
+
+    {scrollbar, style}
   end
 
   def normalize(_other, style), do: normalize(true, style)
@@ -202,6 +216,16 @@ defmodule BackBreeze.Scrollbar do
     end
   end
 
+  @spec put_color(t(), term()) :: t()
+  def put_color(%__MODULE__{} = config, color) do
+    %{
+      config
+      | vertical: Map.new(config.vertical, fn {k, s} -> {k, color_segment(s, color)} end),
+        horizontal: Map.new(config.horizontal, fn {k, s} -> {k, color_segment(s, color)} end),
+        intersection: color_segment(config.intersection, color)
+    }
+  end
+
   @spec style_sequence(map()) :: binary()
   def style_sequence(%Segment{} = segment), do: segment.style
   def style_sequence(_segment), do: ""
@@ -241,8 +265,14 @@ defmodule BackBreeze.Scrollbar do
     end
   end
 
+  defp color_segment(%Segment{} = segment, color) do
+    %{segment | foreground_color: color} |> segment_to_renderable()
+  end
+
+  defp color_segment(nil, _color), do: nil
+
   defp build_context(%{style: style} = options) do
-    normalized = normalize(style.scrollbar, style)
+    {normalized, style} = normalize(style.scrollbar, style)
     style = %{style | scrollbar: normalized}
     {scroll_top, scroll_left} = Map.get(options, :scroll, {0, 0})
 
@@ -525,10 +555,10 @@ defmodule BackBreeze.Scrollbar do
 
   defp maybe_draw_axis_arrows(
          layer_map,
-         %AxisContext{config: %{arrows: true}} = axis_context,
+         %AxisContext{config: %{arrows: arrows}} = axis_context,
          total_size
        )
-       when total_size >= 3 do
+       when is_map(arrows) and total_size >= 3 do
     layer_map =
       put_axis_segment(
         layer_map,
@@ -646,29 +676,42 @@ defmodule BackBreeze.Scrollbar do
     end
   end
 
-  defp default(style) do
-    border_color = Map.get(style, :border_color)
+  defp default(map, style) when is_map(map) do
+    color = Map.get(map, :foreground_color)
 
-    %__MODULE__{
-      enabled: false,
-      vertical: %{
-        track: %Segment{char: "│", foreground_color: border_color},
-        thumb: %Segment{char: "█"},
-        arrow_start: %Segment{char: "▲", foreground_color: border_color},
-        arrow_end: %Segment{char: "▼", foreground_color: border_color}
-      },
-      horizontal: %{
-        track: %Segment{char: "─", foreground_color: border_color},
-        thumb: %Segment{char: "█"},
-        arrow_start: %Segment{char: "◀", foreground_color: border_color},
-        arrow_end: %Segment{char: "▶", foreground_color: border_color}
-      },
-      intersection: %Segment{char: "┘", foreground_color: border_color}
-    }
-    |> renderable_segments()
+    style =
+      if is_nil(Map.get(style, :border_color)) && !is_nil(color),
+        do: %{style | border_color: color},
+        else: style
+
+    {default(style), style}
   end
 
-  defp build_axis_segments(base, common_thumb, common_track, overrides, fallback_color) do
+  defp default(style) do
+    base = %__MODULE__{
+      enabled: false,
+      vertical: %{
+        track: %Segment{char: "│"},
+        thumb: %Segment{char: "█"},
+        arrow_start: %Segment{char: "▲"},
+        arrow_end: %Segment{char: "▼"}
+      },
+      horizontal: %{
+        track: %Segment{char: "─"},
+        thumb: %Segment{char: "█"},
+        arrow_start: %Segment{char: "◀"},
+        arrow_end: %Segment{char: "▶"}
+      },
+      intersection: %Segment{char: "┘"}
+    }
+
+    case Map.get(style, :border_color) do
+      nil -> renderable_segments(base)
+      color -> put_color(base, color)
+    end
+  end
+
+  defp build_axis_segments(base, common_thumb, common_track, common_arrows, overrides, fallback_color) do
     overrides = if is_map(overrides), do: overrides, else: %{}
 
     thumb =
@@ -686,11 +729,13 @@ defmodule BackBreeze.Scrollbar do
 
     arrow_start =
       base.arrow_start
+      |> merge_segment(common_arrows, fallback_color)
       |> merge_segment(Map.get(overrides, :arrow_start, %{}), fallback_color)
       |> segment_to_renderable()
 
     arrow_end =
       base.arrow_end
+      |> merge_segment(common_arrows, fallback_color)
       |> merge_segment(Map.get(overrides, :arrow_end, %{}), fallback_color)
       |> segment_to_renderable()
 

@@ -21,6 +21,10 @@ defmodule BackBreeze.Style do
     %{style | bold: true}
   end
 
+  def italic(style \\ %Style{}) do
+    %{style | italic: true}
+  end
+
   def reverse(style \\ %Style{}) do
     %{style | reverse: true}
   end
@@ -53,29 +57,52 @@ defmodule BackBreeze.Style do
     %{style | border: BackBreeze.Border.bottom(style.border)}
   end
 
-  @overflows [:hidden, :auto]
-  def overflow(style \\ %Style{}, overflow) when overflow in @overflows do
+  def overflow(style \\ %Style{}, overflow)
+
+  def overflow(style, :scroll) do
+    %{style | overflow: :hidden, scrollbar: true}
+  end
+
+  def overflow(style, overflow) when overflow in [:hidden, :auto] do
     %{style | overflow: overflow}
   end
 
-  @scrollbars [false, true, :vertical, :horizontal, :both]
+  @scrollbars [false, :vertical, :horizontal, :both]
 
-  def scrollbar(style \\ %Style{}, scrollbar \\ true)
+  def scrollbar(style \\ %Style{}, scrollbar)
+
+  def scrollbar(style, true) do
+    {normalized, style} = BackBreeze.Scrollbar.normalize(true, style)
+    %{style | scrollbar: normalized}
+  end
 
   def scrollbar(style, scrollbar) when scrollbar in @scrollbars do
     %{style | scrollbar: scrollbar}
   end
 
   def scrollbar(style, scrollbar) when is_map(scrollbar) do
-    %{style | scrollbar: scrollbar}
+    {normalized, style} = BackBreeze.Scrollbar.normalize(scrollbar, style)
+    %{style | scrollbar: normalized}
   end
 
-  def scrollbar(style, %BackBreeze.Scrollbar{} = scrollbar) do
-    %{style | scrollbar: scrollbar}
+  def border_color(style \\ %Style{}, color) do
+    style = %{style | border_color: color}
+
+    case style.scrollbar do
+      %BackBreeze.Scrollbar{vertical: %{track: %{foreground_color: nil}}} ->
+        %{style | scrollbar: BackBreeze.Scrollbar.put_color(style.scrollbar, color)}
+
+      _ ->
+        style
+    end
   end
 
   def foreground_color(style \\ %Style{}, color) do
     %{style | foreground_color: color}
+  end
+
+  def background_color(style \\ %Style{}, color) do
+    %{style | background_color: color}
   end
 
   def render(style, str, opts \\ []) do
@@ -111,7 +138,7 @@ defmodule BackBreeze.Style do
     border = %{border | color: style.border_color}
     lines = String.split(str, "\n")
 
-    content_height = length(lines)
+    content_height = if List.last(lines) == "", do: length(lines) - 1, else: length(lines)
     original_height = height
 
     width =

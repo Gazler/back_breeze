@@ -41,6 +41,12 @@ defmodule BackBreeze.Box do
         _ -> style
       end
 
+    style =
+      case Map.get(style, :scrollbar) do
+        true -> BackBreeze.Style.scrollbar(style, true)
+        _ -> style
+      end
+
     style = struct(BackBreeze.Style, style)
 
     struct(BackBreeze.Box, Map.put(map, :style, style))
@@ -85,7 +91,7 @@ defmodule BackBreeze.Box do
   defp render_and_calc(%{box: %{children: []} = box} = acc, opts) do
     {content, dimensions, width} = render_self(box, opts)
 
-    scrollbar_config = BackBreeze.Scrollbar.normalize(box.style.scrollbar, box.style)
+    {scrollbar_config, _} = BackBreeze.Scrollbar.normalize(box.style.scrollbar, box.style)
 
     {content, width, layer_map} =
       if box.style.overflow == :hidden and scrollbar_config.enabled do

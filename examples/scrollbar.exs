@@ -32,6 +32,7 @@ vertical_bottom =
     scroll: {max_vertical_scroll, 0},
     style: %{
       border: :line,
+      border_color: 3,
       width: 20,
       height: vertical_height,
       overflow: :hidden,
@@ -61,12 +62,13 @@ both_axes =
     scroll: {2, 7},
     style: %{
       border: :line,
+      border_color: 3,
       width: 18,
       height: 4,
       overflow: :hidden,
       scrollbar: %{
         axis: :both,
-        arrows: true,
+        arrows: %{foreground_color: 4},
         thumb: %{char: "▓", foreground_color: 2, bold: true},
         track: %{char: "·", foreground_color: 8}
       }

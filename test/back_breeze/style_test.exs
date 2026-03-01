@@ -16,7 +16,7 @@ defmodule BackBreeze.StyleTest do
     end
 
     test "supports scrollbar style values" do
-      assert BackBreeze.Style.scrollbar().scrollbar == true
+      assert BackBreeze.Style.scrollbar(%BackBreeze.Style{}, true).scrollbar.enabled == true
       assert BackBreeze.Style.scrollbar(%BackBreeze.Style{}, :vertical).scrollbar == :vertical
       assert BackBreeze.Style.scrollbar(%BackBreeze.Style{}, :horizontal).scrollbar == :horizontal
       assert BackBreeze.Style.scrollbar(%BackBreeze.Style{}, :both).scrollbar == :both
@@ -66,6 +66,52 @@ defmodule BackBreeze.StyleTest do
 
       assert length(output) == height
       assert String.length(hd(output)) == width
+    end
+  end
+
+  describe "overflow/2" do
+    test ":scroll sets overflow hidden and enables scrollbar" do
+      style = BackBreeze.Style.overflow(:scroll)
+      assert style.overflow == :hidden
+      assert style.scrollbar == true
+    end
+  end
+
+  describe "border_color/2" do
+    test "sets border_color" do
+      style = BackBreeze.Style.border_color(3)
+      assert style.border_color == 3
+    end
+  end
+
+  describe "scrollbar color inheritance" do
+    test "scrollbar foreground_color propagates to border_color when not set" do
+      style = BackBreeze.Style.scrollbar(%BackBreeze.Style{}, %{foreground_color: 5})
+      assert style.border_color == 5
+    end
+
+    test "scrollbar foreground_color does not overwrite existing border_color" do
+      style =
+        BackBreeze.Style.border_color(3)
+        |> BackBreeze.Style.scrollbar(%{foreground_color: 5})
+
+      assert style.border_color == 3
+    end
+
+    test "border_color propagates to scrollbar regardless of order" do
+      forward = BackBreeze.Style.border_color(3) |> BackBreeze.Style.scrollbar(true)
+      backward = BackBreeze.Style.scrollbar(%BackBreeze.Style{}, true) |> BackBreeze.Style.border_color(3)
+
+      assert forward.scrollbar.vertical.track.foreground_color == 3
+      assert backward.scrollbar.vertical.track.foreground_color == 3
+    end
+
+    test "border_color does not overwrite explicit scrollbar colors" do
+      style =
+        BackBreeze.Style.scrollbar(%BackBreeze.Style{}, %{foreground_color: 5})
+        |> BackBreeze.Style.border_color(3)
+
+      assert style.scrollbar.vertical.track.foreground_color == 5
     end
   end
 
