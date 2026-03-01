@@ -49,7 +49,7 @@ child =
     style: %{
       border: :line,
       width: 30,
-      height: 5,
+      height: 30,
       overflow: :hidden,
       scrollbar: %{
         axis: :vertical,
@@ -59,7 +59,7 @@ child =
       }
     },
     scroll: {2, 0},
-    content: "3 box WITH CONFIGURED SCROLLBAR #{content}"
+    content: "3 box WITH CONFIGURED SCROLLBAR #{String.duplicate(content, 4)}"
   })
 
 box = BackBreeze.Box.new(style: %{border: :line}, children: [child]) |> BackBreeze.Box.render()

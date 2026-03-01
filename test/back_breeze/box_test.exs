@@ -488,7 +488,70 @@ defmodule BackBreeze.BoxTest do
       assert String.contains?(rendered.content, "▼")
       assert String.contains?(rendered.content, "◀")
       assert String.contains?(rendered.content, "▶")
-      assert String.contains?(rendered.content, "┼")
+      assert String.contains?(rendered.content, "┘")
+    end
+
+    test "vertical arrows are not trimmed when horizontal scrollbar sits on the bottom border" do
+      child = BackBreeze.Box.new(content: Enum.map_join(1..8, "\n", fn _ -> "ABCDEFGHIJKL" end))
+
+      box =
+        BackBreeze.Box.new(
+          style: %{
+            border: :line,
+            width: 6,
+            height: 4,
+            overflow: :hidden,
+            scrollbar: %{axis: :both, arrows: true}
+          },
+          children: [child]
+        )
+
+      rendered = BackBreeze.Box.render(box)
+      rows = String.split(rendered.content, "\n")
+
+      assert String.ends_with?(Enum.at(rows, 1), "▲")
+      assert String.ends_with?(Enum.at(rows, 4), "▼")
+    end
+
+    test "horizontal arrows are not trimmed when vertical scrollbar sits on the right border" do
+      child = BackBreeze.Box.new(content: Enum.map_join(1..8, "\n", fn _ -> "ABCDEFGHIJKL" end))
+
+      box =
+        BackBreeze.Box.new(
+          style: %{
+            border: :line,
+            width: 6,
+            height: 4,
+            overflow: :hidden,
+            scrollbar: %{axis: :both, arrows: true}
+          },
+          children: [child]
+        )
+
+      rendered = BackBreeze.Box.render(box)
+      rows = String.split(rendered.content, "\n")
+
+      assert String.ends_with?(Enum.at(rows, 5), "▶┘")
+    end
+
+    test "supports colored horizontal scrollbar" do
+      child = BackBreeze.Box.new(content: "ABCDEFGH")
+
+      box =
+        BackBreeze.Box.new(
+          style: %{
+            border: :line,
+            width: 5,
+            height: 2,
+            overflow: :hidden,
+            scrollbar: %{axis: :horizontal, thumb: %{foreground_color: 2}, track: %{foreground_color: 8}}
+          },
+          children: [child]
+        )
+
+      rendered = BackBreeze.Box.render(box)
+      assert String.contains?(rendered.content, "\e[38;5;2m███\e[0m")
+      assert String.contains?(rendered.content, "\e[38;5;8m──\e[0m")
     end
   end
 
