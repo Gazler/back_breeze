@@ -41,6 +41,14 @@ defmodule BackBreeze.Style do
     %{style | border: BackBreeze.Border.line()}
   end
 
+  def border(style, :rounded) do
+    %{style | border: BackBreeze.Border.rounded()}
+  end
+
+  def border(style, :line) do
+    %{style | border: BackBreeze.Border.line()}
+  end
+
   def border_left(style \\ %Style{}) do
     %{style | border: BackBreeze.Border.left(style.border)}
   end

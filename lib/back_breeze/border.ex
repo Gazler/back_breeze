@@ -48,6 +48,23 @@ defmodule BackBreeze.Border do
   end
 
   @doc """
+  Return a rounded border.
+  """
+  def rounded() do
+    %Border{
+      style: :rounded,
+      top: "─",
+      bottom: "─",
+      left: "│",
+      right: "│",
+      top_left: "╭",
+      top_right: "╮",
+      bottom_left: "╰",
+      bottom_right: "╯"
+    }
+  end
+
+  @doc """
   Return an invisible border.
   """
   def invisible() do

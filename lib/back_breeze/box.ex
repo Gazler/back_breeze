@@ -38,6 +38,7 @@ defmodule BackBreeze.Box do
     style =
       case Map.get(style, :border) do
         :line -> %{style | border: BackBreeze.Border.line()}
+        :rounded -> %{style | border: BackBreeze.Border.rounded()}
         _ -> style
       end
 

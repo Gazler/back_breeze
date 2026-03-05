@@ -39,7 +39,7 @@ children =
 %{content: content} =
   BackBreeze.Box.new(
     children: children,
-    style: %{border: :line, width: :screen, border_color: 1},
+    style: %{border: :rounded, width: :screen, border_color: 1},
     display: %BackBreeze.Grid{columns: 3}
   )
   |> BackBreeze.Box.render(terminal: %Termite.Terminal{size: %{width: 53, height: 14}})
