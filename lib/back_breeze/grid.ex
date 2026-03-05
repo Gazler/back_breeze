@@ -73,7 +73,11 @@ defmodule BackBreeze.Grid do
     rows = Enum.chunk_every(items, grid.columns)
     row_count = grid.rows || length(rows)
 
-    total_height = screen_height - height_offset
+    total_height =
+      case style.height do
+        h when is_integer(h) and h > 0 -> h
+        _ -> screen_height - height_offset
+      end
     base_height = div(total_height, row_count)
     remainder = rem(total_height, row_count)
 

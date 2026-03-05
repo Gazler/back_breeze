@@ -66,6 +66,25 @@ defmodule BackBreeze.Integration.GridTest do
     assert heights == [4, 3, 3]
   end
 
+  test "grid with explicit height uses it as total_height instead of screen height" do
+    child = fn x -> BackBreeze.Box.new(style: %{border: :line}, content: x) end
+
+    box =
+      BackBreeze.Box.new(
+        children: [child.("A"), child.("B"), child.("C")],
+        style: %{border: :line, width: :screen, height: 9},
+        display: %BackBreeze.Grid{columns: 1, rows: 3}
+      )
+
+    %{dimensions: dimensions} =
+      BackBreeze.Box.render_with_dimensions(box,
+        terminal: %Termite.Terminal{size: %{width: 20, height: 12}}
+      )
+
+    heights = dimensions |> Enum.drop(1) |> Enum.map(& &1.height)
+    assert heights == [3, 3, 3]
+  end
+
   test "grid dimensions" do
     %{dimensions: dimensions} =
       BackBreeze.Box.render_with_dimensions(grid_box(),
