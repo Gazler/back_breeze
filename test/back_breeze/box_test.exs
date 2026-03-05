@@ -638,6 +638,41 @@ defmodule BackBreeze.BoxTest do
     end
   end
 
+  describe "width: :full" do
+    test "child fills parent content width" do
+      child = BackBreeze.Box.new(content: "Hi", style: %{border: :line, width: :full})
+      box = BackBreeze.Box.new(children: [child], style: %{border: :line, width: 10})
+      rendered = BackBreeze.Box.render(box)
+
+      # width: 10 is content width, so outer box is 12 wide (10 + 2 border)
+      # child fills to 10 content - 2 (child border) = 8 content, 10 total
+      assert rendered.content ==
+               """
+               ┌──────────┐
+               │┌────────┐│
+               ││Hi      ││
+               │└────────┘│
+               └──────────┘\
+               """
+    end
+
+    test "multiple children without border each fill parent width" do
+      child = fn text -> BackBreeze.Box.new(content: text, style: %{width: :full}) end
+      box = BackBreeze.Box.new(children: [child.("A"), child.("B")], style: %{border: :line, width: 8})
+      rendered = BackBreeze.Box.render(box)
+
+      # width: 8 is content width, outer box is 10 wide (8 + 2 border)
+      # children fill to parent_width = 8 (no child border to subtract)
+      assert rendered.content ==
+               """
+               ┌────────┐
+               │A       │
+               │B       │
+               └────────┘\
+               """
+    end
+  end
+
   describe "join_horizontal/2" do
     test "joins items with padding" do
       items = ["One line", "Two\nLines", "Three\n+\n+\nLines"]

@@ -276,7 +276,8 @@ defmodule BackBreeze.Box do
               state: :rendered
           }
 
-          {children ++ [child], dims ++ dimensions}
+          container_dim = %{content_height: h, viewport_height: h, height: h}
+          {children ++ [child], dims ++ [container_dim | dimensions]}
 
         child_box, child_acc ->
           {children, dimensions} = child_acc
@@ -320,8 +321,15 @@ defmodule BackBreeze.Box do
   end
 
   defp render_children(%{box: %{children: children} = box} = acc, opts) when children != [] do
+    parent_width =
+      case box.style.width do
+        w when is_integer(w) -> w
+        _ -> nil
+      end
+
     {children, acc} =
       set_layer(children, [], -1)
+      |> resolve_fill_widths(parent_width)
       |> Enum.reduce({[], acc}, fn box, {boxes, child_acc} ->
         child_acc = render_and_calc(%{child_acc | box: box}, opts)
         {[child_acc.box | boxes], child_acc}
@@ -500,6 +508,22 @@ defmodule BackBreeze.Box do
   end
 
   defp raw_content_width(_), do: 0
+
+  defp resolve_fill_widths(children, nil), do: children
+
+  defp resolve_fill_widths(children, parent_width) do
+    Enum.map(children, fn child ->
+      if child.style.width == :full do
+        border_adj =
+          (if child.style.border.left, do: 1, else: 0) +
+            (if child.style.border.right, do: 1, else: 0)
+
+        %{child | style: %{child.style | width: max(0, parent_width - border_adj)}}
+      else
+        child
+      end
+    end)
+  end
 
   defp set_layer([], result, _layer) do
     Enum.reverse(result)

@@ -121,8 +121,8 @@ defmodule BackBreeze.Style do
     {width, style} = Map.pop(style, :width, string_length)
     {height, style} = Map.pop(style, :height, 0)
 
-    auto_width = width == :auto
-    width = if width == :auto, do: string_length, else: width
+    auto_width = width in [:auto, :full]
+    width = if width in [:auto, :full], do: string_length, else: width
     width = if width == :screen, do: screen_width - 2, else: width
     height = if height == :screen, do: screen_height - 2, else: height
 
@@ -158,8 +158,7 @@ defmodule BackBreeze.Style do
 
         acc <>
           BackBreeze.Border.render_left(border) <>
-          Termite.Style.render_to_string(termite_style, line) <>
-          String.duplicate(" ", string_padding) <>
+          Termite.Style.render_to_string(termite_style, line <> String.duplicate(" ", string_padding)) <>
           BackBreeze.Border.render_right(border) <> "\n"
       end)
 
