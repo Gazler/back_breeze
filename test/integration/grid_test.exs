@@ -47,6 +47,25 @@ defmodule BackBreeze.Integration.GridTest do
              """
   end
 
+  test "grid distributes remainder rows evenly" do
+    child = fn x -> BackBreeze.Box.new(style: %{border: :line}, content: x) end
+
+    box =
+      BackBreeze.Box.new(
+        children: [child.("A"), child.("B"), child.("C")],
+        style: %{border: :line, width: :screen},
+        display: %BackBreeze.Grid{columns: 1, rows: 3}
+      )
+
+    %{dimensions: dimensions} =
+      BackBreeze.Box.render_with_dimensions(box,
+        terminal: %Termite.Terminal{size: %{width: 20, height: 12}}
+      )
+
+    heights = dimensions |> Enum.drop(1) |> Enum.map(& &1.height)
+    assert heights == [4, 3, 3]
+  end
+
   test "grid dimensions" do
     %{dimensions: dimensions} =
       BackBreeze.Box.render_with_dimensions(grid_box(),
@@ -54,8 +73,9 @@ defmodule BackBreeze.Integration.GridTest do
       )
 
     assert dimensions == [
-             %{height: 14, content_height: 20, viewport_height: 12},
+             %{height: 14, content_height: 28, viewport_height: 12},
              %{height: 12, content_height: 3, viewport_height: 3},
+             %{height: 12, content_height: 12, viewport_height: 12},
              %{height: 4, content_height: 1, viewport_height: 1},
              %{height: 4, content_height: 2, viewport_height: 2},
              %{height: 4, content_height: 1, viewport_height: 1},

@@ -12,7 +12,7 @@ defmodule BackBreeze.Grid do
   @doc """
   Create a grid with the specified number of columns.
   """
-  defstruct [:columns]
+  defstruct [:columns, :rows]
 
   @auto_sizes [:screen, :auto]
 
@@ -37,9 +37,10 @@ defmodule BackBreeze.Grid do
     height_offset = if(style.border.top, do: 1, else: 0) + if style.border.bottom, do: 1, else: 0
 
     rows = Enum.chunk_every(items, grid.columns)
+    row_count = grid.rows || length(rows)
 
     item_width = div(width - width_offset, grid.columns)
-    item_height = div(height - height_offset, length(rows))
+    item_height = div(height - height_offset, row_count)
 
     %{width: item_width, height: item_height}
   end
@@ -70,13 +71,20 @@ defmodule BackBreeze.Grid do
     height_offset = if(style.border.top, do: 1, else: 0) + if style.border.bottom, do: 1, else: 0
 
     rows = Enum.chunk_every(items, grid.columns)
+    row_count = grid.rows || length(rows)
 
-    item_height = div(screen_height - height_offset, length(rows))
+    total_height = screen_height - height_offset
+    base_height = div(total_height, row_count)
+    remainder = rem(total_height, row_count)
 
-    Enum.map(rows, fn cols ->
+    rows
+    |> Enum.with_index()
+    |> Enum.map(fn {cols, row_index} ->
+      row_height = base_height + if(row_index < remainder, do: 1, else: 0)
+
       Enum.map(cols, fn %{style: %{border: border}} = item ->
         width = item_width - if(border.left, do: 1, else: 0) - if border.right, do: 1, else: 0
-        height = item_height - if(border.top, do: 1, else: 0) - if border.bottom, do: 1, else: 0
+        height = row_height - if(border.top, do: 1, else: 0) - if border.bottom, do: 1, else: 0
 
         style = %{item.style | width: width, height: height, overflow: :hidden}
         BackBreeze.Box.render_with_dimensions(%{item | style: style})
