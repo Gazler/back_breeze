@@ -166,7 +166,10 @@ defmodule BackBreeze.Style do
 
         acc <>
           BackBreeze.Border.render_left(border) <>
-          Termite.Style.render_to_string(termite_style, line <> String.duplicate(" ", string_padding)) <>
+          Termite.Style.render_to_string(
+            termite_style,
+            line <> String.duplicate(" ", string_padding)
+          ) <>
           BackBreeze.Border.render_right(border) <> "\n"
       end)
 

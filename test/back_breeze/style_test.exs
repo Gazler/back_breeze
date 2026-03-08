@@ -100,7 +100,9 @@ defmodule BackBreeze.StyleTest do
 
     test "border_color propagates to scrollbar regardless of order" do
       forward = BackBreeze.Style.border_color(3) |> BackBreeze.Style.scrollbar(true)
-      backward = BackBreeze.Style.scrollbar(%BackBreeze.Style{}, true) |> BackBreeze.Style.border_color(3)
+
+      backward =
+        BackBreeze.Style.scrollbar(%BackBreeze.Style{}, true) |> BackBreeze.Style.border_color(3)
 
       assert forward.scrollbar.vertical.track.foreground_color == 3
       assert backward.scrollbar.vertical.track.foreground_color == 3
