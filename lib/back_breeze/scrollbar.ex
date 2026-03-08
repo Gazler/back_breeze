@@ -711,7 +711,14 @@ defmodule BackBreeze.Scrollbar do
     end
   end
 
-  defp build_axis_segments(base, common_thumb, common_track, common_arrows, overrides, fallback_color) do
+  defp build_axis_segments(
+         base,
+         common_thumb,
+         common_track,
+         common_arrows,
+         overrides,
+         fallback_color
+       ) do
     overrides = if is_map(overrides), do: overrides, else: %{}
 
     thumb =

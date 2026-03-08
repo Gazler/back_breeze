@@ -92,7 +92,13 @@ defmodule BackBreeze.Integration.GridTest do
       )
 
     assert dimensions == [
-             %{height: 14, content_height: 28, viewport_height: 12},
+             %{
+               width: :screen,
+               height: 14,
+               content_height: 28,
+               viewport_height: 12,
+               viewport_width: :screen
+             },
              %{height: 12, content_height: 3, viewport_height: 3},
              %{height: 12, content_height: 12, viewport_height: 12},
              %{height: 4, content_height: 1, viewport_height: 1},

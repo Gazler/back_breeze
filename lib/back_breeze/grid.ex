@@ -78,25 +78,33 @@ defmodule BackBreeze.Grid do
         h when is_integer(h) and h > 0 -> h
         _ -> screen_height - height_offset
       end
+
     base_height = div(total_height, row_count)
     remainder = rem(total_height, row_count)
 
-    rows
-    |> Enum.with_index()
-    |> Enum.map(fn {cols, row_index} ->
-      row_height = base_height + if(row_index < remainder, do: 1, else: 0)
+    rows_with_results =
+      rows
+      |> Enum.with_index()
+      |> Enum.map(fn {cols, row_index} ->
+        row_height = base_height + if(row_index < remainder, do: 1, else: 0)
 
-      Enum.map(cols, fn %{style: %{border: border}} = item ->
-        width = item_width - if(border.left, do: 1, else: 0) - if border.right, do: 1, else: 0
-        height = row_height - if(border.top, do: 1, else: 0) - if border.bottom, do: 1, else: 0
+        Enum.map(cols, fn %{style: %{border: border}} = item ->
+          width = item_width - if(border.left, do: 1, else: 0) - if border.right, do: 1, else: 0
+          height = row_height - if(border.top, do: 1, else: 0) - if border.bottom, do: 1, else: 0
 
-        style = %{item.style | width: width, height: height, overflow: :hidden}
-        BackBreeze.Box.render_with_dimensions(%{item | style: style})
+          style = %{item.style | width: width, height: height, overflow: :hidden}
+          BackBreeze.Box.render_with_dimensions(%{item | style: style})
+        end)
       end)
-      |> BackBreeze.Joiner.new()
-      |> BackBreeze.Joiner.join_horizontal()
-    end)
+
+    per_item_dimensions =
+      Enum.flat_map(rows_with_results, fn row -> Enum.map(row, & &1.dimensions) end)
+
+    rows_with_results
+    |> Enum.map(&BackBreeze.Joiner.new/1)
+    |> Enum.map(&BackBreeze.Joiner.join_horizontal/1)
     |> BackBreeze.Joiner.merge()
     |> BackBreeze.Joiner.join_vertical()
+    |> Map.put(:per_item_dimensions, per_item_dimensions)
   end
 end

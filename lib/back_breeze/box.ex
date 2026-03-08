@@ -168,7 +168,9 @@ defmodule BackBreeze.Box do
         %{
           content_height: 0,
           viewport_height: dimensions.height - border_rows,
-          height: dimensions.height
+          viewport_width: width,
+          height: dimensions.height,
+          width: width
         },
         fn
           {%{position: :absolute}, _}, acc -> acc
@@ -252,13 +254,13 @@ defmodule BackBreeze.Box do
        ) do
     %{width: item_width} = BackBreeze.Grid.precompute(children, box.display, box.style, opts)
 
-    {children, dimensions} =
+    {children, grouped_dims} =
       Enum.reduce(children, {[], []}, fn
         %{display: %BackBreeze.Grid{}, children: children} = child_box, child_acc
         when children != [] ->
           style = %{child_box.style | width: item_width}
 
-          %{content: content, width: w, height: h, dimensions: dimensions} =
+          %{content: content, width: w, height: h, dimensions: inner_dimensions} =
             BackBreeze.Grid.render_with_dimensions(
               child_box.children,
               child_box.display,
@@ -278,11 +280,11 @@ defmodule BackBreeze.Box do
           }
 
           container_dim = %{content_height: h, viewport_height: h, height: h}
-          {children ++ [child], dims ++ [container_dim | dimensions]}
+          {children ++ [child], dims ++ [[container_dim | inner_dimensions]]}
 
         child_box, child_acc ->
-          {children, dimensions} = child_acc
-          {children ++ [child_box], dimensions ++ [nil]}
+          {children, dims} = child_acc
+          {children ++ [child_box], dims ++ [nil]}
       end)
 
     children = set_layer(children, [], -1)
@@ -295,16 +297,22 @@ defmodule BackBreeze.Box do
         _ -> {0, %BackBreeze.Style{}}
       end
 
-    %{content: content, width: width, height: height, dimensions: grid_dims} =
+    %{content: content, width: width, height: height, per_item_dimensions: per_item_dims} =
       BackBreeze.Grid.render_with_dimensions(children, box.display, box.style, opts)
 
-    {_, dimensions, _} =
-      Enum.reduce(dimensions, {acc.id, [], grid_dims}, fn
-        nil, {id, acc, [head | remaining]} -> {id + 1, [{id, head} | acc], remaining}
-        other, {id, acc, remaining} -> {id + 1, [{id, other} | acc], remaining}
+    {final_id, new_dims} =
+      Enum.zip(grouped_dims, per_item_dims)
+      |> Enum.reduce({acc.id, []}, fn
+        {nil, child_dims}, {id, acc_d} ->
+          entries = Enum.with_index(child_dims, id) |> Enum.map(fn {d, i} -> {i, d} end)
+          {id + length(child_dims), acc_d ++ entries}
+
+        {grouped, _}, {id, acc_d} ->
+          entries = Enum.with_index(grouped, id) |> Enum.map(fn {d, i} -> {i, d} end)
+          {id + length(grouped), acc_d ++ entries}
       end)
 
-    acc = %{acc | dimensions: acc.dimensions ++ Enum.reverse(dimensions)}
+    acc = %{acc | dimensions: acc.dimensions ++ new_dims, id: final_id}
 
     absolutes = Enum.filter(children, &(&1.position == :absolute))
 
@@ -328,12 +336,27 @@ defmodule BackBreeze.Box do
         _ -> nil
       end
 
-    {children, acc} =
+    parent_height =
+      case box.style.height do
+        h when is_integer(h) -> h
+        _ -> nil
+      end
+
+    {children, acc, _used_height} =
       set_layer(children, [], -1)
       |> resolve_fill_widths(parent_width)
-      |> Enum.reduce({[], acc}, fn box, {boxes, child_acc} ->
-        child_acc = render_and_calc(%{child_acc | box: box}, opts)
-        {[child_acc.box | boxes], child_acc}
+      |> Enum.reduce({[], acc, 0}, fn child, {boxes, child_acc, used_height} ->
+        child = resolve_fill_height(child, box.display, parent_height, used_height)
+        child_acc = render_and_calc(%{child_acc | box: child}, opts)
+
+        used_height =
+          if child_acc.box.position == :absolute or box.display != :block do
+            used_height
+          else
+            used_height + (child_acc.box.height || rendered_height(child_acc.box.content))
+          end
+
+        {[child_acc.box | boxes], child_acc, used_height}
       end)
 
     children = Enum.reverse(children)
@@ -510,20 +533,54 @@ defmodule BackBreeze.Box do
 
   defp raw_content_width(_), do: 0
 
+  defp rendered_height(content) when is_binary(content) do
+    content
+    |> String.split("\n")
+    |> length()
+  end
+
+  defp rendered_height(_), do: 0
+
   defp resolve_fill_widths(children, nil), do: children
 
   defp resolve_fill_widths(children, parent_width) do
     Enum.map(children, fn child ->
       if child.style.width == :full do
         border_adj =
-          (if child.style.border.left, do: 1, else: 0) +
-            (if child.style.border.right, do: 1, else: 0)
+          if(child.style.border.left, do: 1, else: 0) +
+            if child.style.border.right, do: 1, else: 0
 
         %{child | style: %{child.style | width: max(0, parent_width - border_adj)}}
       else
         child
       end
     end)
+  end
+
+  defp resolve_fill_height(child, _display, nil, _used_height), do: child
+
+  defp resolve_fill_height(child, :inline, parent_height, _used_height) do
+    if child.style.height == :full do
+      border_adj =
+        if(child.style.border.top, do: 1, else: 0) +
+          if(child.style.border.bottom, do: 1, else: 0)
+
+      %{child | style: %{child.style | height: max(0, parent_height - border_adj)}}
+    else
+      child
+    end
+  end
+
+  defp resolve_fill_height(child, :block, parent_height, used_height) do
+    if child.position == :absolute or child.style.height != :full do
+      child
+    else
+      border_adj =
+        if(child.style.border.top, do: 1, else: 0) +
+          if(child.style.border.bottom, do: 1, else: 0)
+
+      %{child | style: %{child.style | height: max(0, parent_height - used_height - border_adj)}}
+    end
   end
 
   defp set_layer([], result, _layer) do

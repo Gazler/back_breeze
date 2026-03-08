@@ -21,8 +21,8 @@ defmodule BackBreeze.BoxTest do
                """
 
       assert dimensions == [
-               %{height: 8, content_height: 8, viewport_height: 8},
-               %{height: 8, content_height: 8, viewport_height: 6},
+               %{width: 8, height: 8, content_height: 8, viewport_height: 8, viewport_width: 8},
+               %{width: 7, height: 8, content_height: 8, viewport_height: 6, viewport_width: 7},
                %{height: 4, content_height: 2, viewport_height: 2},
                %{height: 4, content_height: 2, viewport_height: 2}
              ]
@@ -192,6 +192,35 @@ defmodule BackBreeze.BoxTest do
                ┌────────┐
                │ABCDEFGH│
                └────────┘\
+               """
+    end
+
+    test "fills remaining parent height for a block child with height-full" do
+      header = BackBreeze.Box.new(content: "Header")
+
+      body =
+        BackBreeze.Box.new(
+          content: "AAAAAA\nBBBBBB\nCCCCCC\nDDDDDD\nEEEEEE\nFFFFFF",
+          style: %{width: 6, height: :full, overflow: :hidden, scrollbar: true}
+        )
+
+      box =
+        BackBreeze.Box.new(
+          style: %{border: :line, width: 6, height: 5, overflow: :hidden},
+          children: [header, body]
+        )
+
+      rendered = BackBreeze.Box.render(box)
+
+      assert rendered.content ==
+               """
+               ┌──────┐
+               │Header│
+               │AAAAA█│
+               │BBBBB█│
+               │CCCCC█│
+               │DDDDD││
+               └──────┘\
                """
     end
 
@@ -544,7 +573,11 @@ defmodule BackBreeze.BoxTest do
             width: 5,
             height: 2,
             overflow: :hidden,
-            scrollbar: %{axis: :horizontal, thumb: %{foreground_color: 2}, track: %{foreground_color: 8}}
+            scrollbar: %{
+              axis: :horizontal,
+              thumb: %{foreground_color: 2},
+              track: %{foreground_color: 8}
+            }
           },
           children: [child]
         )
@@ -610,7 +643,14 @@ defmodule BackBreeze.BoxTest do
 
       box =
         BackBreeze.Box.new(
-          style: %{border: :line, border_color: 3, width: 8, height: 3, overflow: :hidden, scrollbar: true},
+          style: %{
+            border: :line,
+            border_color: 3,
+            width: 8,
+            height: 3,
+            overflow: :hidden,
+            scrollbar: true
+          },
           children: children
         )
 
@@ -658,7 +698,13 @@ defmodule BackBreeze.BoxTest do
 
     test "multiple children without border each fill parent width" do
       child = fn text -> BackBreeze.Box.new(content: text, style: %{width: :full}) end
-      box = BackBreeze.Box.new(children: [child.("A"), child.("B")], style: %{border: :line, width: 8})
+
+      box =
+        BackBreeze.Box.new(
+          children: [child.("A"), child.("B")],
+          style: %{border: :line, width: 8}
+        )
+
       rendered = BackBreeze.Box.render(box)
 
       # width: 8 is content width, outer box is 10 wide (8 + 2 border)

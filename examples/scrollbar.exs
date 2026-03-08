@@ -75,7 +75,28 @@ both_axes =
     }
   )
 
+height_full =
+  BackBreeze.Box.new(
+    style: %{border: :line, width: 24, height: 6, overflow: :hidden},
+    children: [
+      BackBreeze.Box.new(content: "Fixed header"),
+      BackBreeze.Box.new(
+        content:
+          Enum.map_join(1..12, "\n", fn row ->
+            "Row #{row}: fill-height body"
+          end),
+        style: %{
+          width: :full,
+          height: :full,
+          overflow: :hidden,
+          scrollbar: true
+        }
+      )
+    ]
+  )
+
 render.("Vertical scrollbar thumb at top (scroll: {0, 0})", vertical_top)
 render.("Vertical scrollbar thumb at bottom (max scroll)", vertical_bottom)
 render.("Horizontal scrollbar", horizontal)
 render.("Both axes with arrows + custom thumb/track", both_axes)
+render.("height-full child with scrollbar", height_full)
