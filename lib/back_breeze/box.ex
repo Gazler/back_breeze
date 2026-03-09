@@ -330,15 +330,19 @@ defmodule BackBreeze.Box do
   end
 
   defp render_children(%{box: %{children: children} = box} = acc, opts) when children != [] do
+    # Mirror BackBreeze.Style.calculate_and_render/3, which resolves :screen to the
+    # terminal size minus the outer frame.
     parent_width =
       case box.style.width do
         w when is_integer(w) -> w
+        :screen -> opts |> Keyword.get(:terminal) |> BackBreeze.screen_dimensions() |> elem(0) |> Kernel.-(2)
         _ -> nil
       end
 
     parent_height =
       case box.style.height do
         h when is_integer(h) -> h
+        :screen -> opts |> Keyword.get(:terminal) |> BackBreeze.screen_dimensions() |> elem(1) |> Kernel.-(2)
         _ -> nil
       end
 
