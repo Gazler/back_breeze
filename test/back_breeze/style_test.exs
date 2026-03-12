@@ -67,6 +67,38 @@ defmodule BackBreeze.StyleTest do
       assert length(output) == height
       assert String.length(hd(output)) == width
     end
+
+    test "renders unbordered screen-sized content without losing two rows" do
+      style =
+        BackBreeze.Style.height(:screen)
+        |> BackBreeze.Style.width(:screen)
+
+      {output, dimensions} =
+        BackBreeze.Style.calculate_and_render(
+          style,
+          "x",
+          terminal: %Termite.Terminal{size: %{width: 10, height: 4}}
+        )
+
+      assert dimensions.height == 4
+      assert output |> String.split("\n") |> hd() |> String.length() == 10
+    end
+
+    test "renders padding rows with background styling" do
+      style =
+        BackBreeze.Style.height(3)
+        |> BackBreeze.Style.width(4)
+        |> BackBreeze.Style.background_color(0)
+
+      output = BackBreeze.Style.render(style, "")
+
+      assert output ==
+               """
+               \e[48;5;0m    \e[0m
+               \e[48;5;0m    \e[0m
+               \e[48;5;0m    \e[0m\
+               """
+    end
   end
 
   describe "overflow/2" do

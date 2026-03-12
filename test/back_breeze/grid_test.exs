@@ -36,7 +36,7 @@ defmodule BackBreeze.GridTest do
     items = ["Foo", "Bar", "Baz"] |> Enum.map(&BackBreeze.Box.new(content: &1))
     style = %BackBreeze.Style{width: :screen, height: :screen} |> BackBreeze.Style.border()
 
-    assert {"Foo   Bar   Baz   \n                  \n                  ", 18, 3} =
+    assert {"Foo   Bar   Baz   \n                  ", 18, 2} =
              BackBreeze.Grid.render(items, %Grid{columns: 3}, style, terminal: terminal)
   end
 end
