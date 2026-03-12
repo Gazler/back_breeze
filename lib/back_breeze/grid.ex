@@ -14,7 +14,7 @@ defmodule BackBreeze.Grid do
   """
   defstruct [:columns, :rows]
 
-  @auto_sizes [:screen, :auto]
+  @auto_sizes [:screen, :auto, :full]
 
   @doc false
   def precompute(items, grid, style, opts) do
@@ -38,11 +38,15 @@ defmodule BackBreeze.Grid do
 
     rows = Enum.chunk_every(items, grid.columns)
     row_count = grid.rows || length(rows)
+    column_widths = resolve_track_sizes(rows, grid.columns, width - width_offset, :width)
+    row_heights = resolve_track_sizes(rows, row_count, height - height_offset, :height)
 
-    item_width = div(width - width_offset, grid.columns)
-    item_height = div(height - height_offset, row_count)
-
-    %{width: item_width, height: item_height}
+    %{
+      width: Enum.min(column_widths, fn -> 0 end),
+      height: Enum.max(row_heights, fn -> 0 end),
+      column_widths: column_widths,
+      row_heights: row_heights
+    }
   end
 
   @doc false
@@ -62,16 +66,16 @@ defmodule BackBreeze.Grid do
     # Although this is similar to the calculation in precompute, dividing into columns happens
     # only if the width is not explicitly specified, compared to always dividing in the
     # precompute function
-    item_width =
-      case style.width do
-        width when width in @auto_sizes -> div(screen_width - width_offset, grid.columns)
-        other -> other
-      end
-
     height_offset = if(style.border.top, do: 1, else: 0) + if style.border.bottom, do: 1, else: 0
 
     rows = Enum.chunk_every(items, grid.columns)
     row_count = grid.rows || length(rows)
+
+    total_width =
+      case style.width do
+        width when width in @auto_sizes -> screen_width - width_offset
+        other -> other
+      end
 
     total_height =
       case style.height do
@@ -79,32 +83,180 @@ defmodule BackBreeze.Grid do
         _ -> screen_height - height_offset
       end
 
-    base_height = div(total_height, row_count)
-    remainder = rem(total_height, row_count)
+    column_widths = resolve_track_sizes(rows, grid.columns, total_width, :width)
+    row_heights = resolve_track_sizes(rows, row_count, total_height, :height)
 
     rows_with_results =
       rows
       |> Enum.with_index()
       |> Enum.map(fn {cols, row_index} ->
-        row_height = base_height + if(row_index < remainder, do: 1, else: 0)
+        row_height = Enum.at(row_heights, row_index, 0)
 
-        Enum.map(cols, fn %{style: %{border: border}} = item ->
-          width = item_width - if(border.left, do: 1, else: 0) - if border.right, do: 1, else: 0
+        cols
+        |> Enum.with_index()
+        |> Enum.map(fn {%{style: %{border: border}} = item, col_index} ->
+          col_width = Enum.at(column_widths, col_index, 0)
+
+          width = col_width - if(border.left, do: 1, else: 0) - if border.right, do: 1, else: 0
           height = row_height - if(border.top, do: 1, else: 0) - if border.bottom, do: 1, else: 0
 
-          style = %{item.style | width: width, height: height, overflow: :hidden}
-          BackBreeze.Box.render_with_dimensions(%{item | style: style})
+          style = %{item.style | width: max(width, 0), height: max(height, 0)}
+
+          %{
+            item: item,
+            result: BackBreeze.Box.render_with_dimensions(%{item | style: style})
+          }
         end)
       end)
 
     per_item_dimensions =
-      Enum.flat_map(rows_with_results, fn row -> Enum.map(row, & &1.dimensions) end)
+      Enum.flat_map(rows_with_results, fn row -> Enum.map(row, & &1.result.dimensions) end)
 
-    rows_with_results
-    |> Enum.map(&BackBreeze.Joiner.new/1)
-    |> Enum.map(&BackBreeze.Joiner.join_horizontal/1)
-    |> BackBreeze.Joiner.merge()
-    |> BackBreeze.Joiner.join_vertical()
-    |> Map.put(:per_item_dimensions, per_item_dimensions)
+    children =
+      rows_with_results
+      |> Enum.with_index()
+      |> Enum.flat_map(fn {row, row_index} ->
+        top = Enum.take(row_heights, row_index) |> Enum.sum()
+
+        row
+        |> Enum.with_index()
+        |> Enum.map(fn {%{item: item, result: %{box: item_box}}, col_index} ->
+          left = Enum.take(column_widths, col_index) |> Enum.sum()
+
+          overlay? = item_box.overlay? || contains_absolute_descendants?(item)
+
+          layer =
+            if overlay? do
+              max(item_box.layer || 0, 1)
+            else
+              item_box.layer || 0
+            end
+
+          %{
+            item_box
+            | position: :absolute,
+              left: left,
+              top: top,
+              layer: layer,
+              overlay?: overlay?
+          }
+        end)
+      end)
+      |> Enum.sort_by(fn child -> {child.overlay?, child.top || 0, child.left || 0} end)
+
+    %{
+      box: %{content: content, width: rendered_width, height: rendered_height}
+    } =
+      BackBreeze.Box.render_with_dimensions(
+        BackBreeze.Box.new(children: children, style: %{width: total_width})
+      )
+
+    %{
+      content: content,
+      width: max(total_width, rendered_width || total_width),
+      height: max(total_height, rendered_height || total_height),
+      per_item_dimensions: per_item_dimensions
+    }
   end
+
+  defp resolve_track_sizes(rows, track_count, total, axis) do
+    explicit =
+      case axis do
+        :width ->
+          0..(track_count - 1)
+          |> Enum.map(fn track_index ->
+            rows
+            |> Enum.map(&Enum.at(&1, track_index))
+            |> Enum.reject(&is_nil/1)
+            |> Enum.map(&explicit_track_size(&1, axis))
+            |> Enum.reject(&is_nil/1)
+            |> Enum.max(fn -> nil end)
+          end)
+
+        :height ->
+          rows
+          |> Enum.take(track_count)
+          |> Enum.map(fn row ->
+            row
+            |> Enum.map(&explicit_track_size(&1, axis))
+            |> Enum.reject(&is_nil/1)
+            |> Enum.max(fn -> nil end)
+          end)
+      end
+
+    grow_indexes =
+      explicit
+      |> Enum.with_index()
+      |> Enum.flat_map(fn
+        {nil, index} -> [index]
+        _ -> []
+      end)
+
+    distribute_dimension(track_count, max(total, 0), explicit, grow_indexes)
+  end
+
+  defp explicit_track_size(item, axis) do
+    case item do
+      %{style: style} ->
+        style_value = Map.get(style, axis)
+        border_size = border_size(style.border, axis)
+
+        case style_value do
+          value when is_integer(value) and value > 0 -> value + border_size
+          _ -> nil
+        end
+
+      _ ->
+        nil
+    end
+  end
+
+  defp border_size(border, :width),
+    do: if(border.left, do: 1, else: 0) + if(border.right, do: 1, else: 0)
+
+  defp border_size(border, :height),
+    do: if(border.top, do: 1, else: 0) + if(border.bottom, do: 1, else: 0)
+
+  defp distribute_dimension(count, total, explicit, grow_indexes) do
+    explicit_total =
+      explicit
+      |> Enum.reject(&is_nil/1)
+      |> Enum.sum()
+
+    remainder = max(total - explicit_total, 0)
+
+    grow_sizes =
+      if grow_indexes == [] do
+        base = div(total, max(count, 1))
+        extra = rem(total, max(count, 1))
+
+        0..(count - 1)
+        |> Enum.map(fn index -> base + if(index < extra, do: 1, else: 0) end)
+      else
+        base = div(remainder, length(grow_indexes))
+        extra = rem(remainder, length(grow_indexes))
+
+        grow_indexes
+        |> Enum.with_index()
+        |> Map.new(fn {track_index, index} ->
+          {track_index, base + if(index < extra, do: 1, else: 0)}
+        end)
+      end
+
+    explicit
+    |> Enum.with_index()
+    |> Enum.map(fn
+      {nil, index} when is_map(grow_sizes) -> Map.get(grow_sizes, index, 0)
+      {nil, index} -> Enum.at(grow_sizes, index, 0)
+      {value, _index} -> value
+    end)
+  end
+
+  defp contains_absolute_descendants?(%{position: :absolute}), do: true
+
+  defp contains_absolute_descendants?(%{children: children}) when is_list(children) do
+    Enum.any?(children, &contains_absolute_descendants?/1)
+  end
+
+  defp contains_absolute_descendants?(_), do: false
 end

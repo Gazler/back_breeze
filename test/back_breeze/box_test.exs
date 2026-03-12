@@ -175,6 +175,74 @@ defmodule BackBreeze.BoxTest do
                """
     end
 
+    test "renders absolute children from a fixed-height child as a parent overlay" do
+      dropdown =
+        BackBreeze.Box.new(
+          style: %{width: 6, height: 1},
+          children: [
+            BackBreeze.Box.new(content: "POST"),
+            BackBreeze.Box.new(content: "GET\nPUT", position: :absolute, left: 0, top: 1)
+          ]
+        )
+
+      sibling = BackBreeze.Box.new(content: "URL")
+
+      box =
+        BackBreeze.Box.new(
+          style: %{border: :line},
+          children: [dropdown, sibling]
+        )
+
+      rendered = BackBreeze.Box.render(box)
+
+      assert rendered.content ==
+               """
+               ┌──────┐
+               │POST  │
+               │GET   │
+               │PUT   │
+               │URL   │
+               └──────┘\
+               """
+    end
+
+    test "absolute full-size children fill their parent" do
+      overlay =
+        BackBreeze.Box.new(
+          position: :absolute,
+          top: 0,
+          left: 0,
+          style: %{width: :full, height: :full, background_color: 0}
+        )
+
+      label =
+        BackBreeze.Box.new(
+          content: "Help",
+          position: :absolute,
+          top: 1,
+          left: 2,
+          style: %{foreground_color: 7, background_color: 0}
+        )
+
+      box =
+        BackBreeze.Box.new(
+          style: %{border: :line, width: 8, height: 4},
+          children: [overlay, label]
+        )
+
+      rendered = BackBreeze.Box.render(box)
+
+      assert rendered.content ==
+               """
+               ┌────────┐
+               │\e[48;5;0m \e[0m\e[48;5;0;38;5;7mHelp\e[0m\e[48;5;0m   \e[0m│
+               │\e[48;5;0m        \e[0m│
+               │\e[48;5;0m        \e[0m│
+               │\e[48;5;0m        \e[0m│
+               └────────┘\
+               """
+    end
+
     test "clips children with width-screen overflow hidden" do
       child = BackBreeze.Box.new(content: "ABCDEFGHIJKLMNOPQRST")
 

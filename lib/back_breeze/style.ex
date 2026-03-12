@@ -130,9 +130,13 @@ defmodule BackBreeze.Style do
     {height, style} = Map.pop(style, :height, 0)
 
     auto_width = width in [:auto, :full]
+    border_width = if(border.left, do: 1, else: 0) + if(border.right, do: 1, else: 0)
+    border_height = if(border.top, do: 1, else: 0) + if(border.bottom, do: 1, else: 0)
+
     width = if width in [:auto, :full], do: string_length, else: width
-    width = if width == :screen, do: screen_width - 2, else: width
-    height = if height == :screen, do: screen_height - 2, else: height
+    width = if width == :screen, do: screen_width - border_width, else: width
+    height = if height == :full, do: 0, else: height
+    height = if height == :screen, do: screen_height - border_height, else: height
 
     str =
       cond do
@@ -144,7 +148,12 @@ defmodule BackBreeze.Style do
     termite_style = to_termite(style)
 
     border = %{border | color: style.border_color}
-    lines = String.split(str, "\n")
+
+    lines =
+      case String.split(str, "\n") do
+        [""] -> []
+        other -> other
+      end
 
     content_height = if List.last(lines) == "", do: length(lines) - 1, else: length(lines)
     original_height = height
@@ -159,42 +168,43 @@ defmodule BackBreeze.Style do
 
     lines = Enum.slice(lines, start_pos..end_pos//1)
 
-    content =
-      Enum.reduce(lines, "", fn line, acc ->
+    rendered_rows =
+      Enum.map(lines, fn line ->
         string_length = BackBreeze.Utils.string_length(line)
         string_padding = if width > string_length, do: width - string_length, else: 0
 
-        acc <>
-          BackBreeze.Border.render_left(border) <>
+        BackBreeze.Border.render_left(border) <>
           Termite.Style.render_to_string(
             termite_style,
             line <> String.duplicate(" ", string_padding)
           ) <>
-          BackBreeze.Border.render_right(border) <> "\n"
+          BackBreeze.Border.render_right(border)
       end)
 
-    line_length = length(lines)
-    height = if line_length > height, do: 0, else: height + 1 - line_length
+    line_count = length(lines)
 
-    padding =
-      if height > 1 do
-        Enum.reduce(1..(height - 1), "", fn _i, acc ->
-          acc <>
+    padding_rows =
+      case height - line_count do
+        remaining when remaining > 0 ->
+          Enum.map(1..remaining, fn _i ->
             BackBreeze.Border.render_left(border) <>
-            String.duplicate(" ", width) <>
-            BackBreeze.Border.render_right(border) <> "\n"
-        end)
-      else
-        ""
+              Termite.Style.render_to_string(termite_style, String.duplicate(" ", width)) <>
+              BackBreeze.Border.render_right(border)
+          end)
+
+        _ ->
+          []
       end
 
-    content =
-      BackBreeze.Border.render_top(border, width) <>
-        String.trim_trailing(content, "\n") <>
-        if(padding != "" || border.bottom, do: "\n", else: "") <>
-        padding <> BackBreeze.Border.render_bottom(border, width)
+    rows =
+      []
+      |> maybe_append_row(BackBreeze.Border.render_top(border, width))
+      |> Kernel.++(rendered_rows)
+      |> Kernel.++(padding_rows)
+      |> maybe_append_row(BackBreeze.Border.render_bottom(border, width))
 
-    height = String.split(content, "\n") |> length()
+    content = Enum.join(rows, "\n")
+    height = length(rows)
 
     viewport_height =
       if original_height == 0 do
@@ -217,4 +227,8 @@ defmodule BackBreeze.Style do
       _, t_style -> t_style
     end)
   end
+
+  defp maybe_append_row(rows, ""), do: rows
+  defp maybe_append_row(rows, nil), do: rows
+  defp maybe_append_row(rows, row), do: rows ++ [String.trim_trailing(row, "\n")]
 end
