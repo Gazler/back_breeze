@@ -21,10 +21,46 @@ defmodule BackBreeze.BoxTest do
                """
 
       assert dimensions == [
-               %{width: 8, height: 8, content_height: 8, viewport_height: 8, viewport_width: 8},
-               %{width: 7, height: 8, content_height: 8, viewport_height: 6, viewport_width: 7},
-               %{height: 4, content_height: 2, viewport_height: 2},
-               %{height: 4, content_height: 2, viewport_height: 2}
+               %{
+                 left: 0,
+                 top: 0,
+                 width: 8,
+                 height: 8,
+                 content_width: 8,
+                 content_height: 8,
+                 viewport_height: 8,
+                 viewport_width: 8
+               },
+               %{
+                 left: 0,
+                 top: 0,
+                 width: 7,
+                 height: 8,
+                 content_width: 7,
+                 content_height: 8,
+                 viewport_height: 6,
+                 viewport_width: 7
+               },
+               %{
+                 left: 1,
+                 top: 1,
+                 width: 7,
+                 viewport_width: 7,
+                 content_width: 7,
+                 height: 4,
+                 content_height: 2,
+                 viewport_height: 2
+               },
+               %{
+                 left: 1,
+                 top: 5,
+                 width: 7,
+                 viewport_width: 7,
+                 content_width: 7,
+                 height: 4,
+                 content_height: 2,
+                 viewport_height: 2
+               }
              ]
     end
   end

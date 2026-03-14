@@ -93,6 +93,14 @@ defmodule BackBreeze.Box do
   defp render_and_calc(%{box: %{children: []} = box} = acc, opts) do
     {content, dimensions, width} = render_self(box, opts)
 
+    dimensions =
+      dimensions
+      |> Map.put(:width, width)
+      |> Map.put_new(:viewport_width, width)
+      |> Map.put_new(:content_width, width)
+      |> Map.put(:left, 0)
+      |> Map.put(:top, 0)
+
     {scrollbar_config, _} = BackBreeze.Scrollbar.normalize(box.style.scrollbar, box.style)
 
     {content, width, layer_map} =
@@ -139,7 +147,6 @@ defmodule BackBreeze.Box do
 
     {child_layer_map, child_width, child_height, has_overlay_children?, child_layer, acc} =
       render_children(%{acc | id: prev_id + 1}, opts)
-
     style_width = if box.style.width == :auto, do: 0, else: box.style.width
 
     width =
@@ -207,6 +214,14 @@ defmodule BackBreeze.Box do
       else
         dimensions
       end
+
+    dimensions =
+      dimensions
+      |> Map.put(:width, width)
+      |> Map.put_new(:viewport_width, width)
+      |> Map.put_new(:content_width, width)
+      |> Map.put(:left, 0)
+      |> Map.put(:top, 0)
 
     acc = %{acc | dimensions: [{prev_id, dimensions} | acc.dimensions], id: acc.id}
 
@@ -321,6 +336,8 @@ defmodule BackBreeze.Box do
         when children != [] ->
           row_index = div(child_index, box.display.columns)
           col_index = rem(child_index, box.display.columns)
+          child_left = span_before(column_widths, col_index)
+          child_top = span_before(row_heights, row_index)
 
           style = %{
             child_box.style
@@ -350,12 +367,31 @@ defmodule BackBreeze.Box do
                   contains_absolute_descendants?(child_box)
           }
 
-          container_dim = %{content_height: h, viewport_height: h, height: h}
-          {children ++ [child], dims ++ [[container_dim | List.flatten(inner_dimensions)]]}
+          container_dim = %{
+            content_height: h,
+            viewport_height: h,
+            height: h,
+            width: w,
+            viewport_width: w,
+            content_width: w,
+            left: child_left,
+            top: child_top
+          }
 
-        {child_box, _child_index}, child_acc ->
+          shifted_inner_dimensions =
+            inner_dimensions
+            |> List.flatten()
+            |> shift_dimensions(child_left, child_top)
+
+          {children ++ [child], dims ++ [%{dims: [container_dim | shifted_inner_dimensions]}]}
+
+        {child_box, child_index}, child_acc ->
+          row_index = div(child_index, box.display.columns)
+          col_index = rem(child_index, box.display.columns)
+          child_left = span_before(column_widths, col_index)
+          child_top = span_before(row_heights, row_index)
           {children, dims} = child_acc
-          {children ++ [child_box], dims ++ [nil]}
+          {children ++ [child_box], dims ++ [%{dims: nil, left: child_left, top: child_top}]}
       end)
 
     children = set_layer(children, [], -1)
@@ -381,11 +417,12 @@ defmodule BackBreeze.Box do
     {final_id, new_dims} =
       Enum.zip(grouped_dims, per_item_dims)
       |> Enum.reduce({acc.id, []}, fn
-        {nil, child_dims}, {id, acc_d} ->
-          entries = Enum.with_index(child_dims, id) |> Enum.map(fn {d, i} -> {i, d} end)
+        {%{dims: nil, left: left, top: top}, child_dims}, {id, acc_d} ->
+          shifted_child_dims = shift_dimensions(child_dims, left, top)
+          entries = Enum.with_index(shifted_child_dims, id) |> Enum.map(fn {d, i} -> {i, d} end)
           {id + length(child_dims), acc_d ++ entries}
 
-        {grouped, _}, {id, acc_d} ->
+        {%{dims: grouped}, _}, {id, acc_d} ->
           entries = Enum.with_index(grouped, id) |> Enum.map(fn {d, i} -> {i, d} end)
           {id + length(grouped), acc_d ++ entries}
       end)
@@ -393,7 +430,6 @@ defmodule BackBreeze.Box do
     acc = %{acc | dimensions: acc.dimensions ++ new_dims, id: final_id}
 
     absolutes = Enum.filter(children, &(&1.position == :absolute))
-
     relative = %{
       box
       | style: style,
@@ -415,22 +451,25 @@ defmodule BackBreeze.Box do
     parent_width = resolved_parent_width(box, opts)
     parent_height = resolved_parent_height(box, opts)
 
-    {children, acc, _used_height} =
+    {children, acc, _used_extent} =
       set_layer(children, [], -1)
       |> Enum.map(&resolve_absolute_fill_offsets(&1, box.style.border))
       |> resolve_fill_widths(parent_width, box.display)
-      |> Enum.reduce({[], acc, 0}, fn child, {boxes, child_acc, used_height} ->
-        child = resolve_fill_height(child, box.display, parent_height, used_height)
+      |> Enum.reduce({[], acc, 0}, fn child, {boxes, child_acc, used_extent} ->
+        child = resolve_fill_height(child, box.display, parent_height, used_extent)
+        {child_left, child_top} = child_origin(box, child, used_extent)
+        child_id = child_acc.id
         child_acc = render_and_calc(%{child_acc | box: child}, opts)
+        child_acc = shift_dimension_range(child_acc, child_id, child_acc.id, child_left, child_top)
 
-        used_height =
-          if child_acc.box.position == :absolute or box.display != :block do
-            used_height
+        used_extent =
+          if child_acc.box.position == :absolute do
+            used_extent
           else
-            used_height + (child_acc.box.height || rendered_height(child_acc.box.content))
+            used_extent + child_extent(child_acc.box, box.display)
           end
 
-        {[child_acc.box | boxes], child_acc, used_height}
+        {[child_acc.box | boxes], child_acc, used_extent}
       end)
 
     children = Enum.reverse(children)
@@ -473,7 +512,6 @@ defmodule BackBreeze.Box do
       end
 
     absolutes = Enum.filter(children, &(&1.position == :absolute))
-
     relative = %{
       box
       | style: style,
@@ -780,6 +818,56 @@ defmodule BackBreeze.Box do
   defp default_fill_offset(nil, edge), do: if(edge, do: 1, else: 0)
   defp default_fill_offset(0, edge), do: if(edge, do: 1, else: 0)
   defp default_fill_offset(offset, _edge), do: offset
+
+  defp child_origin(%{display: :inline, style: %{border: border}}, child, used_extent) do
+    left = used_extent + border_left_offset(border)
+    top = border_top_offset(border)
+
+    case child.position do
+      :absolute -> {child.left || 0, child.top || 0}
+      _ -> {left, top}
+    end
+  end
+
+  defp child_origin(%{style: %{border: border}}, child, used_extent) do
+    left = border_left_offset(border)
+    top = used_extent + border_top_offset(border)
+
+    case child.position do
+      :absolute -> {child.left || 0, child.top || 0}
+      _ -> {left, top}
+    end
+  end
+
+  defp child_extent(child, :inline), do: child.width || raw_content_width(child.content)
+  defp child_extent(child, _display), do: child.height || rendered_height(child.content)
+  defp span_before(values, index), do: values |> Enum.take(index) |> Enum.sum()
+
+  defp shift_dimension_range(acc, from_id, to_id, left_offset, top_offset) do
+    dimensions =
+      Enum.map(acc.dimensions, fn
+        {id, dims} when id >= from_id and id < to_id ->
+          {id, shift_dimension(dims, left_offset, top_offset)}
+
+        entry ->
+          entry
+      end)
+
+    %{acc | dimensions: dimensions}
+  end
+
+  defp shift_dimensions(dimensions, left_offset, top_offset) do
+    Enum.map(dimensions, &shift_dimension(&1, left_offset, top_offset))
+  end
+
+  defp shift_dimension(dims, left_offset, top_offset) do
+    dims
+    |> Map.update(:left, left_offset, &(&1 + left_offset))
+    |> Map.update(:top, top_offset, &(&1 + top_offset))
+  end
+
+  defp border_left_offset(border), do: if(border.left, do: 1, else: 0)
+  defp border_top_offset(border), do: if(border.top, do: 1, else: 0)
 
   defp set_layer([], result, _layer) do
     Enum.reverse(result)
