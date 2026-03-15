@@ -85,6 +85,7 @@ defmodule BackBreeze.Grid do
 
     column_widths = resolve_track_sizes(rows, grid.columns, total_width, :width)
     row_heights = resolve_track_sizes(rows, row_count, total_height, :height)
+
     rows_with_results =
       rows
       |> Enum.with_index()
@@ -146,7 +147,9 @@ defmodule BackBreeze.Grid do
     %{
       box: %{content: content, width: rendered_width, height: rendered_height}
     } =
-      BackBreeze.Box.render_with_dimensions(BackBreeze.Box.new(children: children, style: %{width: total_width}))
+      BackBreeze.Box.render_with_dimensions(
+        BackBreeze.Box.new(children: children, style: %{width: total_width})
+      )
 
     %{
       content: content,
@@ -256,5 +259,4 @@ defmodule BackBreeze.Grid do
   end
 
   defp contains_absolute_descendants?(_), do: false
-
 end

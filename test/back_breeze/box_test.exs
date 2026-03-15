@@ -279,6 +279,48 @@ defmodule BackBreeze.BoxTest do
                """
     end
 
+    test "supports absolute right and bottom offsets" do
+      child = BackBreeze.Box.new(content: "OK", position: :absolute, right: 1, bottom: 1)
+
+      box =
+        BackBreeze.Box.new(
+          style: %{border: :line, width: 8, height: 4},
+          children: [child]
+        )
+
+      rendered = BackBreeze.Box.render(box)
+
+      assert rendered.content ==
+               """
+               ┌────────┐
+               │        │
+               │        │
+               │        │
+               │      OK│
+               └────────┘\
+               """
+    end
+
+    test "supports fixed right and bottom offsets relative to the screen" do
+      child = BackBreeze.Box.new(content: "X", position: :fixed, right: 0, bottom: 0)
+
+      box =
+        BackBreeze.Box.new(
+          style: %{width: :screen, height: :screen},
+          children: [child]
+        )
+
+      rendered =
+        BackBreeze.Box.render(box, terminal: %Termite.Terminal{size: %{width: 5, height: 3}})
+
+      assert rendered.content ==
+               """
+                    
+                    
+                   X\
+               """
+    end
+
     test "clips children with width-screen overflow hidden" do
       child = BackBreeze.Box.new(content: "ABCDEFGHIJKLMNOPQRST")
 

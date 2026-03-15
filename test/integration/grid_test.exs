@@ -144,18 +144,75 @@ defmodule BackBreeze.Integration.GridTest do
 
     assert dimensions == [
              %{
+               left: 0,
+               top: 0,
                width: :screen,
                height: 14,
+               content_width: :screen,
                content_height: 28,
                viewport_height: 12,
                viewport_width: :screen
              },
-             %{height: 12, content_height: 3, viewport_height: 3},
-             %{height: 12, content_height: 12, viewport_height: 12},
-             %{height: 4, content_height: 1, viewport_height: 1},
-             %{height: 4, content_height: 2, viewport_height: 2},
-             %{height: 4, content_height: 1, viewport_height: 1},
-             %{height: 12, content_height: 1, viewport_height: 1}
+             %{
+               left: 0,
+               top: 0,
+               width: 17,
+               height: 12,
+               content_width: 17,
+               content_height: 3,
+               viewport_height: 3,
+               viewport_width: 17
+             },
+             %{
+               left: 17,
+               top: 0,
+               width: 17,
+               height: 12,
+               content_width: 17,
+               content_height: 12,
+               viewport_height: 12,
+               viewport_width: 17
+             },
+             %{
+               left: 17,
+               top: 0,
+               width: 17,
+               height: 4,
+               content_width: 17,
+               content_height: 1,
+               viewport_height: 1,
+               viewport_width: 17
+             },
+             %{
+               left: 17,
+               top: 0,
+               width: 17,
+               height: 4,
+               content_width: 17,
+               content_height: 2,
+               viewport_height: 2,
+               viewport_width: 17
+             },
+             %{
+               left: 17,
+               top: 0,
+               width: 17,
+               height: 4,
+               content_width: 17,
+               content_height: 1,
+               viewport_height: 1,
+               viewport_width: 17
+             },
+             %{
+               left: 34,
+               top: 0,
+               width: 17,
+               height: 12,
+               content_width: 17,
+               content_height: 1,
+               viewport_height: 1,
+               viewport_width: 17
+             }
            ]
   end
 end
