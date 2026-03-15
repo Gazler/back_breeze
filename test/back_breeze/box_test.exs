@@ -24,12 +24,12 @@ defmodule BackBreeze.BoxTest do
                %{
                  left: 0,
                  top: 0,
-                 width: 8,
+                 width: 9,
                  height: 8,
-                 content_width: 8,
+                 content_width: 9,
                  content_height: 8,
                  viewport_height: 8,
-                 viewport_width: 8
+                 viewport_width: 9
                },
                %{
                  left: 0,
