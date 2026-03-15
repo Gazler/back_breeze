@@ -113,16 +113,13 @@ defmodule BackBreeze.Grid do
 
             %{
               item: item,
-              result: BackBreeze.Box.render_with_dimensions(%{item | style: style})
+              result: render_grid_item(item, style)
             }
           end)
         end)
       end)
 
     per_item_dimensions =
-      Enum.flat_map(rows_with_results, fn row -> Enum.map(row, & &1.result.dimensions) end)
-
-    children =
       rows_with_results
       |> Enum.with_index()
       |> Enum.flat_map(fn {row, row_index} ->
@@ -130,45 +127,99 @@ defmodule BackBreeze.Grid do
 
         row
         |> Enum.with_index()
-        |> Enum.map(fn {%{item: item, result: %{box: item_box}}, col_index} ->
+        |> Enum.map(fn {%{result: %{dimensions: dimensions}}, col_index} ->
           left = Enum.take(column_widths, col_index) |> Enum.sum()
-
-          overlay? = item_box.overlay? || contains_absolute_descendants?(item)
-
-          layer =
-            if overlay? do
-              max(item_box.layer || 0, 1)
-            else
-              item_box.layer || 0
-            end
-
-          %{
-            item_box
-            | position: :absolute,
-              left: left,
-              top: top,
-              layer: layer,
-              overlay?: overlay?
-          }
+          Enum.map(dimensions, &shift_dimension(&1, left, top))
         end)
       end)
-      |> Enum.sort_by(fn child -> {child.overlay?, child.top || 0, child.left || 0} end)
 
-    %{
-      box: %{content: content, width: rendered_width, height: rendered_height}
-    } =
+    simple_row_or_column? =
+      Enum.all?(List.flatten(rows_with_results), fn %{item: item, result: %{box: item_box}} ->
+        not item_box.overlay? and not contains_absolute_descendants?(item)
+      end)
+
+    {content, rendered_width, rendered_height, layer_map} =
       BenchProfile.measure({__MODULE__, :compose}, fn ->
-        BackBreeze.Box.render_with_dimensions(
-          BackBreeze.Box.new(children: children, style: %{width: total_width})
-        )
+        cond do
+          simple_row_or_column? and grid.columns == 1 ->
+            rows_with_results
+            |> Enum.map(fn
+              [%{result: %{box: item_box}}] ->
+                item_box.content
+
+              row ->
+                Enum.map_join(row, "\n", fn %{result: %{box: item_box}} -> item_box.content end)
+            end)
+            |> BackBreeze.Box.join_vertical(height: total_height)
+            |> then(fn {content, width, height} -> {content, width, height, %{}} end)
+
+          simple_row_or_column? and row_count == 1 ->
+            rows_with_results
+            |> List.flatten()
+            |> Enum.map(fn %{result: %{box: item_box}} -> item_box.content end)
+            |> BackBreeze.Box.join_horizontal()
+            |> then(fn {content, width, height} -> {content, width, height, %{}} end)
+
+          true ->
+            children =
+              rows_with_results
+              |> Enum.with_index()
+              |> Enum.flat_map(fn {row, row_index} ->
+                top = Enum.take(row_heights, row_index) |> Enum.sum()
+
+                row
+                |> Enum.with_index()
+                |> Enum.map(fn {%{item: item, result: %{box: item_box}}, col_index} ->
+                  left = Enum.take(column_widths, col_index) |> Enum.sum()
+
+                  overlay? = item_box.overlay? || contains_absolute_descendants?(item)
+
+                  layer =
+                    if overlay? do
+                      max(item_box.layer || 0, 1)
+                    else
+                      item_box.layer || 0
+                    end
+
+                  %{
+                    item_box
+                    | position: :absolute,
+                      left: left,
+                      top: top,
+                      layer: layer,
+                      overlay?: overlay?
+                  }
+                end)
+              end)
+              |> Enum.sort_by(fn child -> {child.overlay?, child.top || 0, child.left || 0} end)
+
+            %{content: content, width: width, height: height, layer_map: layer_map} =
+              BackBreeze.Box.compose_absolute_children(
+                children,
+                width: total_width,
+                height: total_height,
+                clip: true
+              )
+
+            {content, width, height, layer_map}
+        end
       end)
 
     %{
       content: content,
-      width: max(total_width, rendered_width || total_width),
-      height: max(total_height, rendered_height || total_height),
-      per_item_dimensions: per_item_dimensions
+      width: resolved_extent(style.width, total_width, rendered_width),
+      height: resolved_extent(style.height, total_height, rendered_height),
+      per_item_dimensions: per_item_dimensions,
+      layer_map: layer_map
     }
+  end
+
+  defp resolved_extent(value, total, rendered) do
+    cond do
+      is_integer(value) and value > 0 -> total
+      value in @auto_sizes -> total
+      true -> rendered || total
+    end
   end
 
   defp resolve_track_sizes(rows, track_count, total, axis) do
@@ -262,6 +313,21 @@ defmodule BackBreeze.Grid do
       {nil, index} -> Enum.at(grow_sizes, index, 0)
       {value, _index} -> value
     end)
+  end
+
+  defp render_grid_item(%{state: :rendered, width: width, height: height} = item, style)
+       when width == style.width and height == style.height do
+    %{box: item, dimensions: []}
+  end
+
+  defp render_grid_item(item, style) do
+    BackBreeze.Box.render_with_dimensions(%{item | style: style})
+  end
+
+  defp shift_dimension(dims, left, top) do
+    dims
+    |> Map.update(:left, left, &(&1 + left))
+    |> Map.update(:top, top, &(&1 + top))
   end
 
   defp contains_absolute_descendants?(%{position: :absolute}), do: true
