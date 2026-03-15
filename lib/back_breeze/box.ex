@@ -4,6 +4,7 @@ defmodule BackBreeze.Box do
   they will be rendered first and collapsed down, until a single box remains with
   the rendered contents.
   """
+  alias BackBreeze.BenchProfile
   alias BackBreeze.Ucwidth
 
   defstruct content: "",
@@ -93,7 +94,8 @@ defmodule BackBreeze.Box do
   end
 
   defp render_and_calc(%{box: %{children: []} = box} = acc, opts) do
-    {content, dimensions, width} = render_self(box, opts)
+    {content, dimensions, width} =
+      BenchProfile.measure({__MODULE__, :render_self}, fn -> render_self(box, opts) end)
 
     dimensions =
       dimensions
@@ -107,7 +109,8 @@ defmodule BackBreeze.Box do
 
     {content, width, layer_map} =
       if box.style.overflow == :hidden and scrollbar_config.enabled do
-        {layer_map, max_width, max_height} = generate_layer_map(content, %{}, 0, 0)
+        {layer_map, max_width, max_height} =
+      BenchProfile.measure({__MODULE__, :generate_layer_map}, fn -> generate_layer_map(content, %{}, 0, 0) end)
 
         layer_map =
           BackBreeze.Scrollbar.add_to_layer_map(layer_map, %{
@@ -119,12 +122,14 @@ defmodule BackBreeze.Box do
             max_y: max_height
           })
 
-        {layer_maps_to_content(layer_map, %{}, %{
-           start_x: 0,
-           start_y: 0,
-           max_x: max_width,
-           max_y: max_height
-         }), max_width + 1, layer_map}
+        {BenchProfile.measure({__MODULE__, :layer_maps_to_content}, fn ->
+           layer_maps_to_content(layer_map, %{}, %{
+             start_x: 0,
+             start_y: 0,
+             max_x: max_width,
+             max_y: max_height
+           })
+         end), max_width + 1, layer_map}
       else
         {content, width, %{}}
       end
@@ -148,7 +153,9 @@ defmodule BackBreeze.Box do
     child_length = length(box.children)
 
     {child_layer_map, child_width, child_height, has_overlay_children?, child_layer, acc} =
-      render_children(%{acc | id: prev_id + 1}, opts)
+      BenchProfile.measure({__MODULE__, :render_children}, fn ->
+        render_children(%{acc | id: prev_id + 1}, opts)
+      end)
 
     style_width = if box.style.width == :auto, do: 0, else: box.style.width
 
@@ -182,7 +189,9 @@ defmodule BackBreeze.Box do
 
     # We don't want offset to apply twice in cases when there are children.
     {content, dimensions, _width} =
-      render_self(%{box | width: width, height: height, style: style, scroll: {0, 0}}, opts)
+      BenchProfile.measure({__MODULE__, :render_self}, fn ->
+        render_self(%{box | width: width, height: height, style: style, scroll: {0, 0}}, opts)
+      end)
 
     border_rows =
       if(box.style.border.top, do: 1, else: 0) +
@@ -285,12 +294,14 @@ defmodule BackBreeze.Box do
       })
 
     content =
-      layer_maps_to_content(layer_map, child_layer_map, %{
-        start_x: 0,
-        start_y: 0,
-        max_x: max_width,
-        max_y: max_height
-      })
+      BenchProfile.measure({__MODULE__, :layer_maps_to_content}, fn ->
+        layer_maps_to_content(layer_map, child_layer_map, %{
+          start_x: 0,
+          start_y: 0,
+          max_x: max_width,
+          max_y: max_height
+        })
+      end)
 
     box = %{
       box

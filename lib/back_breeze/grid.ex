@@ -8,6 +8,7 @@ defmodule BackBreeze.Grid do
     children: [BackBreeze.Box.new(content: "Hello"), BackBreeze.Box.new(content: "World")]
   )
   """
+  alias BackBreeze.BenchProfile
 
   @doc """
   Create a grid with the specified number of columns.
@@ -83,29 +84,36 @@ defmodule BackBreeze.Grid do
         _ -> screen_height - height_offset
       end
 
-    column_widths = resolve_track_sizes(rows, grid.columns, total_width, :width)
-    row_heights = resolve_track_sizes(rows, row_count, total_height, :height)
+    {column_widths, row_heights} =
+      BenchProfile.measure({__MODULE__, :tracks}, fn ->
+        {
+          resolve_track_sizes(rows, grid.columns, total_width, :width),
+          resolve_track_sizes(rows, row_count, total_height, :height)
+        }
+      end)
 
     rows_with_results =
-      rows
-      |> Enum.with_index()
-      |> Enum.map(fn {cols, row_index} ->
-        row_height = Enum.at(row_heights, row_index, 0)
-
-        cols
+      BenchProfile.measure({__MODULE__, :children}, fn ->
+        rows
         |> Enum.with_index()
-        |> Enum.map(fn {%{style: %{border: border}} = item, col_index} ->
-          col_width = Enum.at(column_widths, col_index, 0)
+        |> Enum.map(fn {cols, row_index} ->
+          row_height = Enum.at(row_heights, row_index, 0)
 
-          width = col_width - if(border.left, do: 1, else: 0) - if border.right, do: 1, else: 0
-          height = row_height - if(border.top, do: 1, else: 0) - if border.bottom, do: 1, else: 0
+          cols
+          |> Enum.with_index()
+          |> Enum.map(fn {%{style: %{border: border}} = item, col_index} ->
+            col_width = Enum.at(column_widths, col_index, 0)
 
-          style = %{item.style | width: max(width, 0), height: max(height, 0)}
+            width = col_width - if(border.left, do: 1, else: 0) - if border.right, do: 1, else: 0
+            height = row_height - if(border.top, do: 1, else: 0) - if border.bottom, do: 1, else: 0
 
-          %{
-            item: item,
-            result: BackBreeze.Box.render_with_dimensions(%{item | style: style})
-          }
+            style = %{item.style | width: max(width, 0), height: max(height, 0)}
+
+            %{
+              item: item,
+              result: BackBreeze.Box.render_with_dimensions(%{item | style: style})
+            }
+          end)
         end)
       end)
 
@@ -147,9 +155,11 @@ defmodule BackBreeze.Grid do
     %{
       box: %{content: content, width: rendered_width, height: rendered_height}
     } =
-      BackBreeze.Box.render_with_dimensions(
-        BackBreeze.Box.new(children: children, style: %{width: total_width})
-      )
+      BenchProfile.measure({__MODULE__, :compose}, fn ->
+        BackBreeze.Box.render_with_dimensions(
+          BackBreeze.Box.new(children: children, style: %{width: total_width})
+        )
+      end)
 
     %{
       content: content,
