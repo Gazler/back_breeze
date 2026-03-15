@@ -99,9 +99,9 @@ defmodule BackBreeze.BoxTest do
 
       assert rendered.content ==
                """
-               \e[33m┌─────┐\e[0m
-               \e[33m│\e[0m\e[1mHello\e[0m\e[33m│\e[0m
-               \e[33m└─────┘\e[0m\
+               \e[38;5;3m┌─────┐\e[0m
+               \e[38;5;3m│\e[0m\e[1mHello\e[0m\e[38;5;3m│\e[0m
+               \e[38;5;3m└─────┘\e[0m\
                """
     end
 

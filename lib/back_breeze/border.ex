@@ -198,5 +198,8 @@ defmodule BackBreeze.Border do
   defp render_with_color(str, %{color: nil}), do: str
 
   defp render_with_color(str, %{color: color}),
-    do: Termite.Style.foreground(color) |> Termite.Style.render_to_string(str)
+    do:
+      Termite.Style.ansi256()
+      |> Termite.Style.foreground(color)
+      |> Termite.Style.render_to_string(str)
 end
