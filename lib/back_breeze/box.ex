@@ -110,7 +110,9 @@ defmodule BackBreeze.Box do
     {content, width, layer_map} =
       if box.style.overflow == :hidden and scrollbar_config.enabled do
         {layer_map, max_width, max_height} =
-      BenchProfile.measure({__MODULE__, :generate_layer_map}, fn -> generate_layer_map(content, %{}, 0, 0) end)
+          BenchProfile.measure({__MODULE__, :generate_layer_map}, fn ->
+            generate_layer_map(content, %{}, 0, 0)
+          end)
 
         layer_map =
           BackBreeze.Scrollbar.add_to_layer_map(layer_map, %{

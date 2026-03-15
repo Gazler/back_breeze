@@ -105,7 +105,9 @@ defmodule BackBreeze.Grid do
             col_width = Enum.at(column_widths, col_index, 0)
 
             width = col_width - if(border.left, do: 1, else: 0) - if border.right, do: 1, else: 0
-            height = row_height - if(border.top, do: 1, else: 0) - if border.bottom, do: 1, else: 0
+
+            height =
+              row_height - if(border.top, do: 1, else: 0) - if border.bottom, do: 1, else: 0
 
             style = %{item.style | width: max(width, 0), height: max(height, 0)}
 
