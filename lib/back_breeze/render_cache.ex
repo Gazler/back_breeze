@@ -100,7 +100,11 @@ defmodule BackBreeze.RenderCache do
   end
 
   @impl true
-  def handle_call(:advance_generation, _from, %{current_generation: current, previous_generation: previous} = state) do
+  def handle_call(
+        :advance_generation,
+        _from,
+        %{current_generation: current, previous_generation: previous} = state
+      ) do
     delete_generation(previous)
     next_current = current + 1
     put_generations(next_current, current)

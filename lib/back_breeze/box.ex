@@ -716,6 +716,7 @@ defmodule BackBreeze.Box do
             )
 
           child = resolve_fill_height(child, box.display, parent_height, used_extent)
+          child = resolve_overlay_fill_size(child, box, opts)
 
           child_result =
             BenchProfile.measure({__MODULE__, :flow_child_render}, fn ->
@@ -1771,8 +1772,8 @@ defmodule BackBreeze.Box do
           plain_wrap_leaf_child?(child)
 
       should_fill_width? =
-        ((display != :inline && child.style.width == :full) || auto_wrap_leaf_child? ||
-           (not overlay_position?(child) && auto_fill_container?))
+        (display != :inline && child.style.width == :full) || auto_wrap_leaf_child? ||
+          (not overlay_position?(child) && auto_fill_container?)
 
       if should_fill_width? do
         border_adj = border_horizontal(child.style.border)
@@ -1784,7 +1785,6 @@ defmodule BackBreeze.Box do
     end)
   end
 
-  defp resolve_fill_height(child, _display, nil, _used_height), do: child
   defp resolve_fill_width(child, _display, nil, _used_width, _overflow), do: child
 
   defp resolve_fill_width(child, :inline, parent_width, used_width, _overflow) do
@@ -1799,6 +1799,7 @@ defmodule BackBreeze.Box do
 
   defp resolve_fill_width(child, _display, _parent_width, _used_width, _overflow), do: child
 
+  defp resolve_fill_height(child, _display, nil, _used_height), do: child
 
   defp resolve_fill_height(child, :inline, parent_height, _used_height) do
     if child.style.height == :full do
@@ -1820,6 +1821,57 @@ defmodule BackBreeze.Box do
       %{child | style: %{child.style | height: max(0, parent_height - used_height - border_adj)}}
     end
   end
+
+  defp resolve_overlay_fill_size(%{position: position} = child, parent, opts)
+       when position in [:absolute, :fixed] do
+    {container_width, container_height} =
+      overlay_container_size(child, parent, nil, parent.style.border, opts)
+
+    width =
+      constrained_overlay_extent(
+        child.style.width,
+        child.left,
+        child.right,
+        container_width,
+        border_horizontal(child.style.border)
+      )
+
+    height =
+      constrained_overlay_extent(
+        child.style.height,
+        child.top,
+        child.bottom,
+        container_height,
+        border_vertical(child.style.border)
+      )
+
+    style =
+      child.style
+      |> maybe_put_extent(:width, width)
+      |> maybe_put_extent(:height, height)
+
+    %{child | style: style}
+  end
+
+  defp resolve_overlay_fill_size(child, _parent, _opts), do: child
+
+  defp constrained_overlay_extent(extent, start_edge, end_edge, container_extent, border_extent)
+       when extent in [:screen, :full] and is_integer(start_edge) and is_integer(end_edge) and
+              is_integer(container_extent) do
+    max(container_extent - start_edge - end_edge - border_extent, 0)
+  end
+
+  defp constrained_overlay_extent(
+         _extent,
+         _start_edge,
+         _end_edge,
+         _container_extent,
+         _border_extent
+       ),
+       do: nil
+
+  defp maybe_put_extent(style, _field, nil), do: style
+  defp maybe_put_extent(style, field, value), do: Map.put(style, field, value)
 
   defp resolve_absolute_fill_offsets(
          %{position: position, style: %{width: :full, height: :full}} = child,
@@ -1962,6 +2014,26 @@ defmodule BackBreeze.Box do
   defp border_left_offset(border), do: if(border.left, do: 1, else: 0)
   defp border_top_offset(border), do: if(border.top, do: 1, else: 0)
 
+  defp padding_horizontal(style),
+    do: style_value(style, :padding_left) + style_value(style, :padding_right)
+
+  defp padding_vertical(style),
+    do: style_value(style, :padding_top) + style_value(style, :padding_bottom)
+
+  defp padding_origin(style),
+    do: {style_value(style, :padding_left), style_value(style, :padding_top)}
+
+  defp content_origin(style) do
+    {
+      border_left_offset(style.border) + style_value(style, :padding_left),
+      border_top_offset(style.border) + style_value(style, :padding_top)
+    }
+  end
+
+  defp style_value(style, side_key) do
+    Map.get(style, side_key, Map.get(style, :padding, 0))
+  end
+
   defp plain_content_container?(box, child_content, has_overlay_children?)
        when is_binary(child_content) do
     box.scroll == {0, 0} and
@@ -1986,6 +2058,10 @@ defmodule BackBreeze.Box do
            bold: false,
            italic: false,
            padding: 0,
+           padding_top: 0,
+           padding_right: 0,
+           padding_bottom: 0,
+           padding_left: 0,
            reverse: false,
            border: border,
            overflow: :auto,
@@ -2013,20 +2089,6 @@ defmodule BackBreeze.Box do
     set_layer(rest, [%{box | layer: next_layer} | result], next_layer + 1)
   end
 
-  defp padding_horizontal(style), do: style_value(style, :padding_left) + style_value(style, :padding_right)
-  defp padding_vertical(style), do: style_value(style, :padding_top) + style_value(style, :padding_bottom)
-  defp padding_origin(style), do: {style_value(style, :padding_left), style_value(style, :padding_top)}
-
-  defp content_origin(style) do
-    {
-      border_left_offset(style.border) + style_value(style, :padding_left),
-      border_top_offset(style.border) + style_value(style, :padding_top)
-    }
-  end
-
-  defp style_value(style, side_key) do
-    Map.get(style, side_key, Map.get(style, :padding, 0))
-  end
   defp set_layer([box | rest], result, layer) when is_binary(box) do
     set_layer(rest, [box | result], layer || 0)
   end
@@ -2052,10 +2114,6 @@ defmodule BackBreeze.Box do
     {
       resolve_edge_offset(child.left, child.right, child.width, container_width),
       resolve_edge_offset(child.top, child.bottom, child.height, container_height)
-           padding_top: 0,
-           padding_right: 0,
-           padding_bottom: 0,
-           padding_left: 0,
     }
   end
 
@@ -2107,6 +2165,11 @@ defmodule BackBreeze.Box do
   defp resolve_edge_offset(value, _opposite, _child_size, _container_size) when is_integer(value),
     do: value
 
+  defp resolve_edge_offset(:center, _opposite, child_size, container_size)
+       when is_integer(child_size) and is_integer(container_size) do
+    max(div(container_size - child_size, 2), 0)
+  end
+
   defp resolve_edge_offset(nil, opposite, child_size, container_size)
        when is_integer(opposite) and is_integer(child_size) and is_integer(container_size) do
     max(container_size - child_size - opposite, 0)
@@ -2119,6 +2182,10 @@ defmodule BackBreeze.Box do
       style.italic == false &&
       style.reverse == false &&
       style.padding == 0 &&
+      style_value(style, :padding_top) == 0 &&
+      style_value(style, :padding_right) == 0 &&
+      style_value(style, :padding_bottom) == 0 &&
+      style_value(style, :padding_left) == 0 &&
       style.scrollbar == false &&
       style.border.style == :none &&
       is_nil(style.border_color) &&
@@ -2176,10 +2243,6 @@ defmodule BackBreeze.Box do
           {start_pos, _} = Keyword.get(opts, :scroll, {0, 0})
           end_pos = height + start_pos - 1
           Enum.slice(items, start_pos..end_pos//1)
-      style_value(style, :padding_top) == 0 &&
-      style_value(style, :padding_right) == 0 &&
-      style_value(style, :padding_bottom) == 0 &&
-      style_value(style, :padding_left) == 0 &&
 
         height when is_integer(height) ->
           {start_pos, _} = Keyword.get(opts, :scroll, {0, 0})

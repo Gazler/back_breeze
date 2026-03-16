@@ -384,6 +384,80 @@ defmodule BackBreeze.BoxTest do
                """
     end
 
+    test "supports centered absolute positioning relative to the parent" do
+      child = BackBreeze.Box.new(content: "OK", position: :absolute, left: :center, top: :center)
+
+      box =
+        BackBreeze.Box.new(
+          style: %{border: :line, width: 8, height: 4},
+          children: [child]
+        )
+
+      rendered = BackBreeze.Box.render(box)
+
+      assert rendered.content ==
+               """
+               ┌────────┐
+               │        │
+               │   OK   │
+               │        │
+               │        │
+               └────────┘\
+               """
+    end
+
+    test "supports centered fixed positioning relative to the screen" do
+      child = BackBreeze.Box.new(content: "OK", position: :fixed, left: :center, top: :center)
+
+      box =
+        BackBreeze.Box.new(
+          style: %{width: :screen, height: :screen},
+          children: [child]
+        )
+
+      rendered =
+        BackBreeze.Box.render(box, terminal: %Termite.Terminal{size: %{width: 10, height: 4}})
+
+      assert rendered.content ==
+               """
+                         
+                   OK    
+                         
+                         \
+               """
+    end
+
+    test "supports inset-constrained fixed screen overlays" do
+      child =
+        BackBreeze.Box.new(
+          position: :fixed,
+          left: 1,
+          right: 1,
+          top: 1,
+          bottom: 1,
+          style: %{border: :line, width: :screen, height: :screen}
+        )
+
+      box =
+        BackBreeze.Box.new(
+          style: %{width: :screen, height: :screen},
+          children: [child]
+        )
+
+      rendered =
+        BackBreeze.Box.render(box, terminal: %Termite.Terminal{size: %{width: 10, height: 6}})
+
+      assert rendered.content ==
+               """
+                         
+                ┌──────┐ 
+                │      │ 
+                │      │ 
+                └──────┘ 
+                         \
+               """
+    end
+
     test "clips children with width-screen overflow hidden" do
       child = BackBreeze.Box.new(content: "ABCDEFGHIJKLMNOPQRST")
 
