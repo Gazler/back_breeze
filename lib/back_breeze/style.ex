@@ -7,8 +7,13 @@ defmodule BackBreeze.Style do
   defstruct bold: false,
             italic: false,
             padding: 0,
+            padding_top: 0,
+            padding_right: 0,
+            padding_bottom: 0,
+            padding_left: 0,
             reverse: false,
             border: BackBreeze.Border.none(),
+            text_align: :left,
             width: :auto,
             height: 0,
             overflow: :auto,
@@ -27,6 +32,37 @@ defmodule BackBreeze.Style do
 
   def reverse(style \\ %Style{}) do
     %{style | reverse: true}
+  end
+
+  def padding(style \\ %Style{}, padding) when is_integer(padding) and padding >= 0 do
+    %{
+      style
+      | padding: padding,
+        padding_top: padding,
+        padding_right: padding,
+        padding_bottom: padding,
+        padding_left: padding
+    }
+  end
+
+  def padding_top(style \\ %Style{}, padding) when is_integer(padding) and padding >= 0 do
+    %{style | padding_top: padding}
+  end
+
+  def padding_right(style \\ %Style{}, padding) when is_integer(padding) and padding >= 0 do
+    %{style | padding_right: padding}
+  end
+
+  def padding_bottom(style \\ %Style{}, padding) when is_integer(padding) and padding >= 0 do
+    %{style | padding_bottom: padding}
+  end
+
+  def padding_left(style \\ %Style{}, padding) when is_integer(padding) and padding >= 0 do
+    %{style | padding_left: padding}
+  end
+
+  def text_align(style \\ %Style{}, align) when align in [:left, :center, :right] do
+    %{style | text_align: align}
   end
 
   def width(style \\ %Style{}, width) do
@@ -125,7 +161,13 @@ defmodule BackBreeze.Style do
     string_length = BackBreeze.Utils.string_length(str)
 
     {border, style} = Map.pop(style, :border)
+    {text_align, style} = Map.pop(style, :text_align, :left)
     {overflow, style} = Map.pop(style, :overflow)
+    {padding, style} = Map.pop(style, :padding, 0)
+    {padding_top, style} = Map.pop(style, :padding_top, padding)
+    {padding_right, style} = Map.pop(style, :padding_right, padding)
+    {padding_bottom, style} = Map.pop(style, :padding_bottom, padding)
+    {padding_left, style} = Map.pop(style, :padding_left, padding)
     {width, style} = Map.pop(style, :width, string_length)
     {height, style} = Map.pop(style, :height, 0)
 
@@ -172,25 +214,30 @@ defmodule BackBreeze.Style do
       Enum.map(lines, fn line ->
         string_length = BackBreeze.Utils.string_length(line)
         string_padding = if width > string_length, do: width - string_length, else: 0
+        {left_padding, right_padding} = horizontal_padding(text_align, string_padding)
 
         BackBreeze.Border.render_left(border) <>
           Termite.Style.render_to_string(
             termite_style,
-            line <> String.duplicate(" ", string_padding)
+            String.duplicate(" ", padding_left + left_padding) <>
+              line <>
+              String.duplicate(" ", right_padding + padding_right)
           ) <>
           BackBreeze.Border.render_right(border)
       end)
 
-    line_count = length(lines)
+    inner_width = padding_left + width + padding_right
+
+    top_padding_rows = blank_rows(padding_top, border, termite_style, inner_width)
+
+    bottom_padding_rows = blank_rows(padding_bottom, border, termite_style, inner_width)
+
+    line_count = padding_top + length(lines) + padding_bottom
 
     padding_rows =
       case height - line_count do
         remaining when remaining > 0 ->
-          Enum.map(1..remaining, fn _i ->
-            BackBreeze.Border.render_left(border) <>
-              Termite.Style.render_to_string(termite_style, String.duplicate(" ", width)) <>
-              BackBreeze.Border.render_right(border)
-          end)
+          blank_rows(remaining, border, termite_style, inner_width)
 
         _ ->
           []
@@ -198,10 +245,12 @@ defmodule BackBreeze.Style do
 
     rows =
       []
-      |> maybe_append_row(BackBreeze.Border.render_top(border, width))
+      |> maybe_append_row(BackBreeze.Border.render_top(border, inner_width))
+      |> Kernel.++(top_padding_rows)
       |> Kernel.++(rendered_rows)
+      |> Kernel.++(bottom_padding_rows)
       |> Kernel.++(padding_rows)
-      |> maybe_append_row(BackBreeze.Border.render_bottom(border, width))
+      |> maybe_append_row(BackBreeze.Border.render_bottom(border, inner_width))
 
     content = Enum.join(rows, "\n")
     height = length(rows)
@@ -231,4 +280,22 @@ defmodule BackBreeze.Style do
   defp maybe_append_row(rows, ""), do: rows
   defp maybe_append_row(rows, nil), do: rows
   defp maybe_append_row(rows, row), do: rows ++ [String.trim_trailing(row, "\n")]
+
+  defp blank_rows(count, _border, _termite_style, _inner_width) when count <= 0, do: []
+
+  defp blank_rows(count, border, termite_style, inner_width) do
+    Enum.map(1..count, fn _i ->
+      BackBreeze.Border.render_left(border) <>
+        Termite.Style.render_to_string(termite_style, String.duplicate(" ", inner_width)) <>
+        BackBreeze.Border.render_right(border)
+    end)
+  end
+
+  defp horizontal_padding(:left, padding), do: {0, padding}
+  defp horizontal_padding(:right, padding), do: {padding, 0}
+
+  defp horizontal_padding(:center, padding) do
+    left = div(padding, 2)
+    {left, padding - left}
+  end
 end

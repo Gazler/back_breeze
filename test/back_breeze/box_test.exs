@@ -138,6 +138,23 @@ defmodule BackBreeze.BoxTest do
                """
     end
 
+    test "uses remaining width for width-full children in inline layout" do
+      box =
+        BackBreeze.Box.new(
+          display: :inline,
+          style: %{width: 20},
+          children: [
+            BackBreeze.Box.new(content: "Left"),
+            BackBreeze.Box.new(content: " Mid"),
+            BackBreeze.Box.new(content: "Right", style: %{width: :full, text_align: :right})
+          ]
+        )
+
+      rendered = BackBreeze.Box.render(box)
+
+      assert rendered.content == "Left Mid       Right"
+    end
+
     test "renders a tree with empty absolute nesting" do
       child = BackBreeze.Box.new(content: "Hello", style: %{bold: true, foreground_color: 3})
       nested = BackBreeze.Box.new(children: [child], position: :absolute, top: 0, left: 1)
