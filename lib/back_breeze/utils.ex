@@ -14,17 +14,7 @@ defmodule BackBreeze.Utils do
   ```
   """
   def string_length(str) do
-    str
-    |> String.graphemes()
-    |> Enum.reduce({false, 0}, fn char, {in_seq, len} ->
-      cond do
-        char == "\e" -> {true, len}
-        in_seq && is_terminator?(char) -> {false, len}
-        in_seq == true -> {true, len}
-        true -> {false, len + Ucwidth.width(char)}
-      end
-    end)
-    |> elem(1)
+    do_string_length(str, false, 0)
   end
 
   @doc """
@@ -37,18 +27,41 @@ defmodule BackBreeze.Utils do
   """
   def strip_escape_chars(str) do
     str
-    |> String.graphemes()
-    |> Enum.reduce({false, ""}, fn char, {in_seq, acc} ->
-      cond do
-        char == "\e" -> {true, acc}
-        in_seq && is_terminator?(char) -> {false, acc}
-        in_seq == true -> {true, acc}
-        true -> {false, acc <> char}
-      end
-    end)
-    |> elem(1)
+    |> do_strip_escape_chars(false, [])
+    |> IO.iodata_to_binary()
   end
 
-  defp is_terminator?("m"), do: true
-  defp is_terminator?(_), do: false
+  defp do_string_length(<<>>, _in_seq, len), do: len
+
+  defp do_string_length(<<"\e", rest::binary>>, _in_seq, len),
+    do: do_string_length(rest, true, len)
+
+  defp do_string_length(<<"m", rest::binary>>, true, len), do: do_string_length(rest, false, len)
+  defp do_string_length(<<_char, rest::binary>>, true, len), do: do_string_length(rest, true, len)
+
+  defp do_string_length(<<char, rest::binary>>, false, len) when char < 128,
+    do: do_string_length(rest, false, len + 1)
+
+  defp do_string_length(<<codepoint::utf8, rest::binary>>, false, len) do
+    do_string_length(rest, false, len + Ucwidth.width_codepoint(codepoint))
+  end
+
+  defp do_strip_escape_chars(<<>>, _in_seq, acc), do: Enum.reverse(acc)
+
+  defp do_strip_escape_chars(<<"\e", rest::binary>>, _in_seq, acc),
+    do: do_strip_escape_chars(rest, true, acc)
+
+  defp do_strip_escape_chars(<<"m", rest::binary>>, true, acc),
+    do: do_strip_escape_chars(rest, false, acc)
+
+  defp do_strip_escape_chars(<<_char, rest::binary>>, true, acc),
+    do: do_strip_escape_chars(rest, true, acc)
+
+  defp do_strip_escape_chars(<<char, rest::binary>>, false, acc) when char < 128 do
+    do_strip_escape_chars(rest, false, [char | acc])
+  end
+
+  defp do_strip_escape_chars(<<codepoint::utf8, rest::binary>>, false, acc) do
+    do_strip_escape_chars(rest, false, [<<codepoint::utf8>> | acc])
+  end
 end
