@@ -60,6 +60,15 @@ defmodule BackBreeze.Grid do
 
   @doc false
   def render_with_dimensions(items, grid, style, opts) do
+    render_with_dimensions(items, grid, style, opts, false)
+  end
+
+  @doc false
+  def render_structured_with_dimensions(items, grid, style, opts) do
+    render_with_dimensions(items, grid, style, opts, true)
+  end
+
+  defp render_with_dimensions(items, grid, style, opts, structured?) do
     {screen_width, screen_height} = BackBreeze.screen_dimensions(Keyword.get(opts, :terminal))
 
     width_offset = if(style.border.left, do: 1, else: 0) + if style.border.right, do: 1, else: 0
@@ -117,7 +126,7 @@ defmodule BackBreeze.Grid do
 
             %{
               item: item,
-              result: render_grid_item(item, style),
+              result: render_grid_item(item, style, structured?),
               has_absolute_descendants?: has_absolute_descendants?
             }
           end)
@@ -175,25 +184,53 @@ defmodule BackBreeze.Grid do
 
     {content, rendered_width, rendered_height, layer_map} =
       BenchProfile.measure({__MODULE__, :compose}, fn ->
+        use_structured_simple_compose? = simple_compose_from_layer_maps?(rendered_children)
+
         cond do
           simple_row_or_column? and grid.columns == 1 ->
             rows_with_results
             |> Enum.map(fn
               [%{result: %{box: item_box}}] ->
-                item_box.content
+                materialized_content(item_box)
 
               row ->
-                Enum.map_join(row, "\n", fn %{result: %{box: item_box}} -> item_box.content end)
+                Enum.map_join(row, "\n", fn %{result: %{box: item_box}} ->
+                  materialized_content(item_box)
+                end)
             end)
             |> BackBreeze.Box.join_vertical(height: total_height)
             |> then(fn {content, width, height} -> {content, width, height, %{}} end)
 
-          simple_row_or_column? and row_count == 1 ->
+          simple_row_or_column? and row_count == 1 and not use_structured_simple_compose? ->
             rows_with_results
             |> List.flatten()
-            |> Enum.map(fn %{result: %{box: item_box}} -> item_box.content end)
+            |> Enum.map(fn %{result: %{box: item_box}} -> materialized_content(item_box) end)
             |> BackBreeze.Box.join_horizontal()
             |> then(fn {content, width, height} -> {content, width, height, %{}} end)
+
+          simple_row_or_column? and row_count == 1 ->
+            children =
+              rendered_children
+              |> Enum.sort_by(fn child -> {child.overlay?, child.top || 0, child.left || 0} end)
+              |> Enum.map(&%{&1 | position: :absolute})
+
+            %{width: width, height: height, layer_map: layer_map} =
+              BackBreeze.Box.compose_absolute_children_layer_map(
+                children,
+                width: total_width,
+                height: total_height,
+                clip: true,
+                sorted: true
+              )
+
+            content =
+              if structured? do
+                nil
+              else
+                BackBreeze.Box.layer_map_to_content(layer_map, width, height)
+              end
+
+            {content, width, height, layer_map}
 
           true ->
             children =
@@ -201,14 +238,21 @@ defmodule BackBreeze.Grid do
               |> Enum.sort_by(fn child -> {child.overlay?, child.top || 0, child.left || 0} end)
               |> Enum.map(&%{&1 | position: :absolute})
 
-            %{content: content, width: width, height: height, layer_map: layer_map} =
-              BackBreeze.Box.compose_absolute_children(
+            %{width: width, height: height, layer_map: layer_map} =
+              BackBreeze.Box.compose_absolute_children_layer_map(
                 children,
                 width: total_width,
                 height: total_height,
                 clip: true,
                 sorted: true
               )
+
+            content =
+              if structured? do
+                nil
+              else
+                BackBreeze.Box.layer_map_to_content(layer_map, width, height)
+              end
 
             {content, width, height, layer_map}
         end
@@ -218,6 +262,8 @@ defmodule BackBreeze.Grid do
       content: content,
       width: resolved_extent(style.width, total_width, rendered_width),
       height: resolved_extent(style.height, total_height, rendered_height),
+      content_width: rendered_width,
+      content_height: rendered_height,
       per_item_dimensions: per_item_dimensions,
       layer_map: layer_map,
       rendered_children: rendered_children
@@ -325,12 +371,16 @@ defmodule BackBreeze.Grid do
     end)
   end
 
-  defp render_grid_item(%{state: :rendered, width: width, height: height} = item, style)
+  defp render_grid_item(%{state: :rendered, width: width, height: height} = item, style, _structured?)
        when width == style.width and height == style.height do
     %{box: item, dimensions: []}
   end
 
-  defp render_grid_item(item, style) do
+  defp render_grid_item(item, style, true) do
+    BackBreeze.Box.render_structured_with_dimensions(%{item | style: style})
+  end
+
+  defp render_grid_item(item, style, false) do
     BackBreeze.Box.render_with_dimensions(%{item | style: style})
   end
 
@@ -356,4 +406,24 @@ defmodule BackBreeze.Grid do
   end
 
   defp contains_absolute_descendants?(_), do: false
+
+  defp simple_compose_from_layer_maps?(children) do
+    Enum.any?(children, fn
+      %{content: content, layer_map: layer_map}
+      when not is_binary(content) and is_map(layer_map) and map_size(layer_map) > 0 ->
+        true
+
+      %{layer_map: layer_map} when is_map(layer_map) and map_size(layer_map) > 0 ->
+        true
+
+      _ ->
+        false
+    end)
+  end
+
+  defp materialized_content(%{content: content}) when is_binary(content), do: content
+
+  defp materialized_content(%{layer_map: layer_map, width: width, height: height}) do
+    BackBreeze.Box.layer_map_to_content(layer_map, width, height)
+  end
 end
