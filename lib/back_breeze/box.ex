@@ -5,6 +5,7 @@ defmodule BackBreeze.Box do
   the rendered contents.
   """
   alias BackBreeze.BenchProfile
+  alias BackBreeze.RenderCache
   alias BackBreeze.Ucwidth
 
   @wide_glyph_key :__wide_glyphs__
@@ -101,6 +102,23 @@ defmodule BackBreeze.Box do
   end
 
   @doc false
+  def render_cached_with_dimensions(box, opts \\ []) do
+    structured? = Keyword.get(opts, :structured, false)
+    terminal = Keyword.get(opts, :terminal)
+
+    RenderCache.fetch(
+      {:render_box, structured?, if(terminal, do: terminal.size, else: nil), box},
+      fn ->
+        if structured? do
+          render_structured_with_dimensions(box, Keyword.delete(opts, :structured))
+        else
+          render_with_dimensions(box, opts)
+        end
+      end
+    )
+  end
+
+  @doc false
   def compose_absolute_children(children, opts \\ []) do
     %{width: width, height: height, layer_map: layer_map} =
       compose_absolute_children_layer_map(children, opts)
@@ -159,7 +177,12 @@ defmodule BackBreeze.Box do
 
   @doc false
   def layer_map_to_content(layer_map, width, height) do
-    content_from_layer_map(layer_map, width, height)
+    cached_layer_maps_to_content(layer_map, %{}, %{
+      start_x: 0,
+      start_y: 0,
+      max_x: width - 1,
+      max_y: height - 1
+    })
   end
 
   defp render_and_calc(%{box: %{state: :rendered}} = acc, _opts) do
@@ -186,7 +209,7 @@ defmodule BackBreeze.Box do
       if box.style.overflow == :hidden and scrollbar_config.enabled do
         {base_layer_map, max_width, max_height} =
           BenchProfile.measure({__MODULE__, :generate_layer_map}, fn ->
-            generate_layer_map(content, %{}, 0, 0)
+            cached_generate_layer_map(content)
           end)
 
         layer_map =
@@ -204,7 +227,7 @@ defmodule BackBreeze.Box do
             do: nil,
             else:
               BenchProfile.measure({__MODULE__, :layer_maps_to_content}, fn ->
-                layer_maps_to_content(layer_map, %{}, %{
+                cached_layer_maps_to_content(layer_map, %{}, %{
                   start_x: 0,
                   start_y: 0,
                   max_x: max_width,
@@ -331,8 +354,8 @@ defmodule BackBreeze.Box do
 
       {layer_map, max_width, max_height} =
         BenchProfile.measure({__MODULE__, :container_base_layer}, fn ->
-          maybe_generate_blank_container_layer_map(box, rendered_width, dimensions.height) ||
-            generate_layer_map(content, %{}, 0, 0)
+          cached_blank_container_layer_map(box, rendered_width, dimensions.height) ||
+            cached_generate_layer_map(content)
         end)
 
       max_height = max(max_height, max(rendered_height(content) - 1, 0))
@@ -354,14 +377,14 @@ defmodule BackBreeze.Box do
         if clip_relative_children? and
              (offset_left > 0 or
                 offset_top > 0 or
-             clip_child_layer_map_required?(
-               child_width,
-               child_height,
-               box.style,
-               max_width,
-               max_height,
-               has_overlay_children?
-             )) do
+                clip_child_layer_map_required?(
+                  child_width,
+                  child_height,
+                  box.style,
+                  max_width,
+                  max_height,
+                  has_overlay_children?
+                )) do
           BenchProfile.measure({__MODULE__, :clip_child_layer_map}, fn ->
             clip_child_layer_map(child_layer_map, box.style, max_width, max_height)
           end)
@@ -414,7 +437,7 @@ defmodule BackBreeze.Box do
           nil
         else
           BenchProfile.measure({__MODULE__, :layer_maps_to_content}, fn ->
-            layer_maps_to_content(layer_map, child_layer_map, %{
+            cached_layer_maps_to_content(layer_map, child_layer_map, %{
               start_x: 0,
               start_y: 0,
               max_x: max_width,
@@ -479,9 +502,17 @@ defmodule BackBreeze.Box do
   defp render_self(box, opts) do
     {offset_top, _} = box.scroll
     opts = Keyword.put(opts, :offset_top, offset_top)
-    {content, dimensions} = BackBreeze.Style.calculate_and_render(box.style, box.content, opts)
-    max_width = raw_content_width(content)
-    {content, dimensions, max_width}
+    terminal = Keyword.get(opts, :terminal)
+
+    cache_key =
+      {:render_self, box.style, box.content, offset_top,
+       if(terminal, do: terminal.size, else: nil)}
+
+    RenderCache.fetch(cache_key, fn ->
+      {content, dimensions} = BackBreeze.Style.calculate_and_render(box.style, box.content, opts)
+      max_width = raw_content_width(content)
+      {content, dimensions, max_width}
+    end)
   end
 
   defp render_children(
@@ -658,25 +689,30 @@ defmodule BackBreeze.Box do
         |> resolve_fill_widths(parent_width, box.display, box.style.overflow)
         |> Enum.reduce({[], acc, 0}, fn child, {boxes, child_acc, used_extent} ->
           child = resolve_fill_height(child, box.display, parent_height, used_extent)
-          child_id = child_acc.id
 
-          child_acc =
+          child_result =
             BenchProfile.measure({__MODULE__, :flow_child_render}, fn ->
-              render_and_calc(%{child_acc | box: child}, opts)
+              render_cached_with_dimensions(child,
+                structured: Keyword.get(opts, :structured, false),
+                terminal: Keyword.get(opts, :terminal)
+              )
             end)
 
-          {child_left, child_top} = child_origin(box, child_acc.box, used_extent, opts)
+          {child_left, child_top} = child_origin(box, child_result.box, used_extent, opts)
 
           child_acc =
-            BenchProfile.measure({__MODULE__, :shift_dimension_range}, fn ->
-              shift_dimension_range(child_acc, child_id, child_acc.id, child_left, child_top)
-            end)
+            append_rendered_child_dimensions(
+              child_acc,
+              child_result.dimensions,
+              child_left,
+              child_top
+            )
 
           rendered_child =
-            if overlay_position?(child_acc.box) do
-              child_acc.box
+            if overlay_position?(child_result.box) do
+              child_result.box
             else
-              %{child_acc.box | left: child_left, top: child_top}
+              %{child_result.box | left: child_left, top: child_top}
             end
 
           used_extent =
@@ -792,82 +828,122 @@ defmodule BackBreeze.Box do
 
   defp combine_children(box, absolutes, relative, acc, opts) do
     BenchProfile.measure({__MODULE__, {:combine_children, length(absolutes)}}, fn ->
-      if absolutes == [] do
-        border = box.style.border
-        {start_x, start_y} = container_origin(border)
-
-        {map, width, height} =
-          if layer_map_entries?(relative.layer_map) do
-            merge_layer_map(%{}, relative.layer_map, start_x, start_y)
-          else
-            generate_layer_map(relative.content, %{}, start_x, start_y)
-          end
-
-        {map, width, height, acc}
+      if cacheable_combine_children?(absolutes) do
+        RenderCache.fetch(combine_children_cache_key(box, absolutes, relative, opts), fn ->
+          do_combine_children(box, absolutes, relative, opts)
+        end)
+        |> then(fn {map, width, height} -> {map, width, height, acc} end)
       else
-        case absolutes do
-          [absolute] ->
-            border = box.style.border
-            {rel_x, rel_y} = container_origin(border)
-            {overlay_x, overlay_y} = resolve_overlay_origin(absolute, box, relative, border, opts)
-
-            {base_map, base_width, base_height} =
-              if layer_map_entries?(relative.layer_map) do
-                merge_layer_map(%{}, relative.layer_map, rel_x, rel_y)
-              else
-                generate_layer_map(relative.content, %{}, rel_x, rel_y)
-              end
-
-            {map, width, height} =
-              if layer_map_entries?(absolute.layer_map) do
-                merge_layer_map(base_map, absolute.layer_map, overlay_x, overlay_y)
-              else
-                generate_layer_map(absolute.content, base_map, overlay_x, overlay_y)
-              end
-
-            {map, max(base_width, width), max(base_height, height), acc}
-
-          [absolute_one, absolute_two] ->
-            border = box.style.border
-
-            [first_box, second_box, third_box] =
-              Enum.sort_by([relative, absolute_one, absolute_two], & &1.layer)
-
-            {map, width, height} =
-              merge_rendered_box(%{}, first_box, box, relative, border, opts)
-
-            {map, width, height} =
-              merge_rendered_box(map, second_box, box, relative, border, opts, width, height)
-
-            {map, width, height} =
-              merge_rendered_box(map, third_box, box, relative, border, opts, width, height)
-
-            {map, width, height, acc}
-
-          _ ->
-            rendered_boxes = [relative | absolutes] |> Enum.sort_by(& &1.layer)
-
-            border = box.style.border
-
-            Enum.reduce(rendered_boxes, {%{}, 0, 0, acc}, fn rendered_box,
-                                                             {layer_map, max_width, max_height, acc} ->
-              {map, width, height} =
-                merge_rendered_box(
-                  layer_map,
-                  rendered_box,
-                  box,
-                  relative,
-                  border,
-                  opts,
-                  max_width,
-                  max_height
-                )
-
-              {map, width, height, acc}
-            end)
-        end
+        {map, width, height} = do_combine_children(box, absolutes, relative, opts)
+        {map, width, height, acc}
       end
     end)
+  end
+
+  defp do_combine_children(box, [], relative, _opts) do
+    border = box.style.border
+    {start_x, start_y} = container_origin(border)
+
+    if layer_map_entries?(relative.layer_map) do
+      merge_layer_map(%{}, relative.layer_map, start_x, start_y)
+    else
+      generate_layer_map(relative.content, %{}, start_x, start_y)
+    end
+  end
+
+  defp do_combine_children(box, [absolute], relative, opts) do
+    border = box.style.border
+    {rel_x, rel_y} = container_origin(border)
+    {overlay_x, overlay_y} = resolve_overlay_origin(absolute, box, relative, border, opts)
+
+    {base_map, base_width, base_height} =
+      if layer_map_entries?(relative.layer_map) do
+        merge_layer_map(%{}, relative.layer_map, rel_x, rel_y)
+      else
+        generate_layer_map(relative.content, %{}, rel_x, rel_y)
+      end
+
+    {map, width, height} =
+      if layer_map_entries?(absolute.layer_map) do
+        merge_layer_map(base_map, absolute.layer_map, overlay_x, overlay_y)
+      else
+        generate_layer_map(absolute.content, base_map, overlay_x, overlay_y)
+      end
+
+    {map, max(base_width, width), max(base_height, height)}
+  end
+
+  defp do_combine_children(box, [absolute_one, absolute_two], relative, opts) do
+    border = box.style.border
+
+    [first_box, second_box, third_box] =
+      Enum.sort_by([relative, absolute_one, absolute_two], & &1.layer)
+
+    {map, width, height} =
+      merge_rendered_box(%{}, first_box, box, relative, border, opts)
+
+    {map, width, height} =
+      merge_rendered_box(map, second_box, box, relative, border, opts, width, height)
+
+    merge_rendered_box(map, third_box, box, relative, border, opts, width, height)
+  end
+
+  defp do_combine_children(box, absolutes, relative, opts) do
+    rendered_boxes = [relative | absolutes] |> Enum.sort_by(& &1.layer)
+    border = box.style.border
+
+    {map, width, height, _acc} =
+      Enum.reduce(rendered_boxes, {%{}, 0, 0, nil}, fn rendered_box,
+                                                       {layer_map, max_width, max_height, acc} ->
+        {map, width, height} =
+          merge_rendered_box(
+            layer_map,
+            rendered_box,
+            box,
+            relative,
+            border,
+            opts,
+            max_width,
+            max_height
+          )
+
+        {map, width, height, acc}
+      end)
+
+    {map, width, height}
+  end
+
+  defp cacheable_combine_children?(absolutes), do: length(absolutes) in [1, 2]
+
+  defp combine_children_cache_key(box, absolutes, relative, opts) do
+    terminal = Keyword.get(opts, :terminal)
+
+    {
+      :combine_children,
+      box.style.border,
+      box.width,
+      box.height,
+      box.style.width,
+      box.style.height,
+      if(terminal, do: terminal.size, else: nil),
+      rendered_box_cache_key(relative),
+      Enum.map(absolutes, &rendered_box_cache_key/1)
+    }
+  end
+
+  defp rendered_box_cache_key(box) do
+    {
+      box.position,
+      box.left,
+      box.top,
+      box.right,
+      box.bottom,
+      box.width,
+      box.height,
+      box.layer,
+      box.content,
+      box.layer_map
+    }
   end
 
   defp container_origin(border) do
@@ -954,6 +1030,29 @@ defmodule BackBreeze.Box do
       generate_layer_map_binary(content, layer_map, start_x, start_x, y, 1, false, "", reset)
 
     {acc, max_x - 1, y}
+  end
+
+  defp cached_blank_container_layer_map(box, width, height) do
+    RenderCache.fetch({:blank_container_layer_map, box.style, width, height}, fn ->
+      maybe_generate_blank_container_layer_map(box, width, height)
+    end)
+  end
+
+  defp cached_generate_layer_map(content, start_x \\ 0, start_y \\ 0, layer_map \\ %{})
+
+  defp cached_generate_layer_map(content, start_x, start_y, layer_map)
+       when is_binary(content) and map_size(layer_map) == 0 do
+    if start_x == 0 and start_y == 0 do
+      RenderCache.fetch({:generate_layer_map, content}, fn ->
+        generate_layer_map(content, %{}, 0, 0)
+      end)
+    else
+      generate_layer_map(content, %{}, start_x, start_y)
+    end
+  end
+
+  defp cached_generate_layer_map(content, start_x, start_y, layer_map) do
+    generate_layer_map(content, layer_map, start_x, start_y)
   end
 
   defp maybe_generate_blank_container_layer_map(%{content: "", style: style}, width, height)
@@ -1523,6 +1622,7 @@ defmodule BackBreeze.Box do
        when is_integer(codepoint) do
     width = Ucwidth.width_codepoint(codepoint)
     char = <<codepoint::utf8>>
+
     map =
       map
       |> Map.put({y, x}, {char, current_seq})
@@ -1572,8 +1672,20 @@ defmodule BackBreeze.Box do
     content_metrics(rest, max_width, current_width + 1, line_count, false)
   end
 
-  defp content_metrics(<<codepoint::utf8, rest::binary>>, max_width, current_width, line_count, false) do
-    content_metrics(rest, max_width, current_width + Ucwidth.width_codepoint(codepoint), line_count, false)
+  defp content_metrics(
+         <<codepoint::utf8, rest::binary>>,
+         max_width,
+         current_width,
+         line_count,
+         false
+       ) do
+    content_metrics(
+      rest,
+      max_width,
+      current_width + Ucwidth.width_codepoint(codepoint),
+      line_count,
+      false
+    )
   end
 
   defp resolved_parent_width(%{style: %{width: width, border: border}}, opts) do
@@ -1731,17 +1843,14 @@ defmodule BackBreeze.Box do
   defp child_extent(child, :inline), do: child.width || raw_content_width(child.content)
   defp child_extent(child, _display), do: child.height || rendered_height(child.content)
 
-  defp shift_dimension_range(acc, from_id, to_id, left_offset, top_offset) do
-    dimensions =
-      Enum.map(acc.dimensions, fn
-        {id, dims} when id >= from_id and id < to_id ->
-          {id, shift_dimension(dims, left_offset, top_offset)}
+  defp append_rendered_child_dimensions(acc, dimensions, left_offset, top_offset) do
+    shifted =
+      dimensions
+      |> shift_dimensions(left_offset, top_offset)
+      |> Enum.with_index(acc.id)
+      |> Enum.map(fn {dims, id} -> {id, dims} end)
 
-        entry ->
-          entry
-      end)
-
-    %{acc | dimensions: dimensions}
+    %{acc | dimensions: acc.dimensions ++ shifted, id: acc.id + length(dimensions)}
   end
 
   defp prefix_offsets(values) do
@@ -1789,18 +1898,17 @@ defmodule BackBreeze.Box do
     %{box | content: layer_map_to_content(layer_map, width, height)}
   end
 
-  defp content_from_layer_map(layer_map, width, height)
-       when is_map(layer_map) and is_integer(width) and is_integer(height) and width > 0 and
-              height > 0 do
-    layer_maps_to_content(layer_map, %{}, %{
-      start_x: 0,
-      start_y: 0,
-      max_x: width - 1,
-      max_y: height - 1
-    })
-  end
+  defp cached_layer_maps_to_content(layer_map, overlay_layer_map, bounds) do
+    area = (bounds.max_x - bounds.start_x + 1) * (bounds.max_y - bounds.start_y + 1)
 
-  defp content_from_layer_map(_layer_map, _width, _height), do: ""
+    if area >= 256 and (map_size(layer_map) > 0 or map_size(overlay_layer_map) > 0) do
+      RenderCache.fetch({:layer_maps_to_content, layer_map, overlay_layer_map, bounds}, fn ->
+        layer_maps_to_content(layer_map, overlay_layer_map, bounds)
+      end)
+    else
+      layer_maps_to_content(layer_map, overlay_layer_map, bounds)
+    end
+  end
 
   defp materialized_content(%{content: content}) when is_binary(content), do: content
 
