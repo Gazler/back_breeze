@@ -92,6 +92,9 @@ defmodule BackBreeze.Grid do
         }
       end)
 
+    column_offsets = prefix_offsets(column_widths)
+    row_offsets = prefix_offsets(row_heights)
+
     rows_with_results =
       BenchProfile.measure({__MODULE__, :children}, fn ->
         rows
@@ -123,12 +126,12 @@ defmodule BackBreeze.Grid do
       rows_with_results
       |> Enum.with_index()
       |> Enum.flat_map(fn {row, row_index} ->
-        top = Enum.take(row_heights, row_index) |> Enum.sum()
+        top = Enum.at(row_offsets, row_index, 0)
 
         row
         |> Enum.with_index()
         |> Enum.map(fn {%{result: %{dimensions: dimensions}}, col_index} ->
-          left = Enum.take(column_widths, col_index) |> Enum.sum()
+          left = Enum.at(column_offsets, col_index, 0)
           Enum.map(dimensions, &shift_dimension(&1, left, top))
         end)
       end)
@@ -165,12 +168,12 @@ defmodule BackBreeze.Grid do
               rows_with_results
               |> Enum.with_index()
               |> Enum.flat_map(fn {row, row_index} ->
-                top = Enum.take(row_heights, row_index) |> Enum.sum()
+                top = Enum.at(row_offsets, row_index, 0)
 
                 row
                 |> Enum.with_index()
                 |> Enum.map(fn {%{item: item, result: %{box: item_box}}, col_index} ->
-                  left = Enum.take(column_widths, col_index) |> Enum.sum()
+                  left = Enum.at(column_offsets, col_index, 0)
 
                   overlay? = item_box.overlay? || contains_absolute_descendants?(item)
 
@@ -328,6 +331,15 @@ defmodule BackBreeze.Grid do
     dims
     |> Map.update(:left, left, &(&1 + left))
     |> Map.update(:top, top, &(&1 + top))
+  end
+
+  defp prefix_offsets(values) do
+    {offsets, _sum} =
+      Enum.map_reduce(values, 0, fn value, sum ->
+        {sum, sum + value}
+      end)
+
+    offsets
   end
 
   defp contains_absolute_descendants?(%{position: :absolute}), do: true
