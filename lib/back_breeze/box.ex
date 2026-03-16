@@ -337,7 +337,7 @@ defmodule BackBreeze.Box do
 
       max_height = max(max_height, max(rendered_height(content) - 1, 0))
 
-      {_, offset_left} = box.scroll
+      {offset_top, offset_left} = box.scroll
 
       child_layer_map =
         if offset_left > 0 do
@@ -352,6 +352,8 @@ defmodule BackBreeze.Box do
 
       child_layer_map =
         if clip_relative_children? and
+             (offset_left > 0 or
+                offset_top > 0 or
              clip_child_layer_map_required?(
                child_width,
                child_height,
@@ -359,7 +361,7 @@ defmodule BackBreeze.Box do
                max_width,
                max_height,
                has_overlay_children?
-             ) do
+             )) do
           BenchProfile.measure({__MODULE__, :clip_child_layer_map}, fn ->
             clip_child_layer_map(child_layer_map, box.style, max_width, max_height)
           end)

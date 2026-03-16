@@ -192,6 +192,52 @@ defmodule BackBreeze.BoxTest do
                """
     end
 
+    test "preserves the left border when horizontally scrolling overflowing child content" do
+      box =
+        BackBreeze.Box.new(
+          scroll: {1, 2},
+          style: %{border: :line, width: 6, height: 2, overflow: :hidden},
+          children: [
+            BackBreeze.Box.new(content: "AAAAAA"),
+            BackBreeze.Box.new(content: "BBBBBB"),
+            BackBreeze.Box.new(content: "CCCCCC")
+          ]
+        )
+
+      rendered = BackBreeze.Box.render(box)
+
+      assert rendered.content ==
+               """
+               ┌──────┐
+               │BBBB  │
+               │CCCC  │
+               └──────┘\
+               """
+    end
+
+    test "preserves the top border when vertically scrolling overflowing child content" do
+      box =
+        BackBreeze.Box.new(
+          scroll: {1, 0},
+          style: %{border: :line, width: 6, height: 2, overflow: :hidden},
+          children: [
+            BackBreeze.Box.new(content: "AAAAAA"),
+            BackBreeze.Box.new(content: "BBBBBB"),
+            BackBreeze.Box.new(content: "CCCCCC")
+          ]
+        )
+
+      rendered = BackBreeze.Box.render(box)
+
+      assert rendered.content ==
+               """
+               ┌──────┐
+               │BBBBBB│
+               │CCCCCC│
+               └──────┘\
+               """
+    end
+
     test "clips absolute children inside the viewport" do
       child = BackBreeze.Box.new(content: "HELLO", position: :absolute, left: 5, top: 1)
 
