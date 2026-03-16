@@ -6,6 +6,7 @@ defmodule BackBreeze.RenderBenchmark do
 
   @default_iterations 50
   @warmup_iterations 5
+  @fixture_glob "bench/fixtures/*.etf"
 
   def run(argv) do
     {opts, _argv, _invalid} =
@@ -31,14 +32,24 @@ defmodule BackBreeze.RenderBenchmark do
     phase_profile? = Keyword.get(opts, :phase_profile, false)
 
     scenarios(tree_file, Keyword.get(opts, :width, 250), Keyword.get(opts, :height, 34))
-    |> maybe_filter(filter)
+    |> maybe_filter(filter, Keyword.get(opts, :width, 250), Keyword.get(opts, :height, 34))
     |> Enum.each(&run_scenario(&1, iterations, subtree_depth, top, phase_profile?))
   end
 
-  defp maybe_filter(scenarios, nil), do: scenarios
+  defp maybe_filter(scenarios, nil, _width, _height), do: scenarios
 
-  defp maybe_filter(scenarios, filter) do
-    Enum.filter(scenarios, fn {name, _size, _builder} -> String.contains?(name, filter) end)
+  defp maybe_filter(scenarios, filter, width, height) do
+    cond do
+      File.exists?(filter) ->
+        [{fixture_name(filter), {width, height}, fn -> load_tree!(filter) end}]
+
+      File.exists?(fixture_path(filter)) ->
+        path = fixture_path(filter)
+        [{fixture_name(path), {width, height}, fn -> load_tree!(path) end}]
+
+      true ->
+        Enum.filter(scenarios, fn {name, _size, _builder} -> String.contains?(name, filter) end)
+    end
   end
 
   defp run_scenario({name, size, builder}, iterations, subtree_depth, top, phase_profile?) do
@@ -56,18 +67,17 @@ defmodule BackBreeze.RenderBenchmark do
       Box.render_with_dimensions(box, terminal: terminal)
     end)
 
-    samples =
-      Enum.map(1..iterations, fn _ ->
+    {times, %{box: rendered_box, dimensions: dimensions}} =
+      Enum.reduce(1..iterations, {[], nil}, fn _, {times, _last_result} ->
         {us, result} =
           :timer.tc(fn ->
             Box.render_with_dimensions(box, terminal: terminal)
           end)
 
-        {us, result}
+        {[us | times], result}
       end)
 
-    times = Enum.map(samples, &elem(&1, 0))
-    %{box: rendered_box, dimensions: dimensions} = samples |> List.last() |> elem(1)
+    times = Enum.reverse(times)
 
     IO.puts("")
     IO.puts("#{name} #{elem(size, 0)}x#{elem(size, 1)}")
@@ -166,21 +176,46 @@ defmodule BackBreeze.RenderBenchmark do
   defp format_us(us), do: format_us(us * 1.0)
 
   defp scenarios(nil, _width, _height) do
-    [
+    fixture_scenarios() ++
+      [
       {"flat_text", {80, 24}, &flat_text/0},
       {"stacked_blocks", {80, 24}, &stacked_blocks/0},
       {"nested_grid", {80, 24}, &nested_grid/0},
       {"posting_like_small", {80, 24}, &posting_like/0},
       {"posting_like_medium", {120, 36}, &posting_like/0},
       {"posting_like_wide", {250, 36}, &posting_like/0}
-    ]
+      ]
   end
 
   defp scenarios(tree_file, width, height) do
     [
-      {"captured_tree", {width, height}, fn -> load_tree!(tree_file) end}
+      {fixture_name(tree_file), {width, height}, fn -> load_tree!(tree_file) end}
       | scenarios(nil, width, height)
     ]
+  end
+
+  defp fixture_scenarios do
+    @fixture_glob
+    |> Path.wildcard()
+    |> Enum.map(fn path ->
+      {fixture_name(path), {250, 36}, fn -> load_tree!(path) end}
+    end)
+  end
+
+  defp fixture_name(path) do
+    path
+    |> Path.basename(".etf")
+  end
+
+  defp fixture_path(name) do
+    base =
+      if String.ends_with?(name, ".etf") do
+        name
+      else
+        name <> ".etf"
+      end
+
+    Path.join("bench/fixtures", base)
   end
 
   defp flat_text do
