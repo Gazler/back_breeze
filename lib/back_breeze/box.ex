@@ -85,20 +85,24 @@ defmodule BackBreeze.Box do
   """
 
   def render_with_dimensions(box, opts \\ []) do
-    %{box: box, dimensions: dimensions} =
-      render_and_calc(%{box: box, dimensions: [], id: 0}, opts)
+    RenderCache.with_frame(fn ->
+      %{box: box, dimensions: dimensions} =
+        render_and_calc(%{box: box, dimensions: [], id: 0}, opts)
 
-    dimensions = Enum.sort(dimensions) |> Enum.map(&elem(&1, 1))
-    box = ensure_rendered_content(box)
-    %{box: box, dimensions: dimensions}
+      dimensions = Enum.sort(dimensions) |> Enum.map(&elem(&1, 1))
+      box = ensure_rendered_content(box)
+      %{box: box, dimensions: dimensions}
+    end)
   end
 
   @doc false
   def render_structured_with_dimensions(box, opts \\ []) do
-    %{box: box, dimensions: dimensions} =
-      render_and_calc(%{box: box, dimensions: [], id: 0}, Keyword.put(opts, :structured, true))
+    RenderCache.with_frame(fn ->
+      %{box: box, dimensions: dimensions} =
+        render_and_calc(%{box: box, dimensions: [], id: 0}, Keyword.put(opts, :structured, true))
 
-    %{box: box, dimensions: Enum.sort(dimensions) |> Enum.map(&elem(&1, 1))}
+      %{box: box, dimensions: Enum.sort(dimensions) |> Enum.map(&elem(&1, 1))}
+    end)
   end
 
   @doc false
