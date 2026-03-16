@@ -93,7 +93,12 @@ defmodule BackBreeze.Box do
 
   @doc false
   def compose_absolute_children(children, opts \\ []) do
-    rendered_boxes = Enum.sort_by(children, & &1.layer)
+    rendered_boxes =
+      if Keyword.get(opts, :sorted, false) do
+        children
+      else
+        Enum.sort_by(children, & &1.layer)
+      end
 
     {layer_map, max_width, max_height} =
       Enum.reduce(rendered_boxes, {%{}, 0, 0}, fn box, {layer_map, max_width, max_height} ->
@@ -318,7 +323,15 @@ defmodule BackBreeze.Box do
           (is_integer(box.style.height) && box.style.height > 0 && !has_overlay_children?)
 
       child_layer_map =
-        if clip_relative_children? do
+        if clip_relative_children? and
+             clip_child_layer_map_required?(
+               child_width,
+               child_height,
+               box.style,
+               max_width,
+               max_height,
+               has_overlay_children?
+             ) do
           BenchProfile.measure({__MODULE__, :clip_child_layer_map}, fn ->
             clip_child_layer_map(child_layer_map, box.style, max_width, max_height)
           end)
@@ -455,67 +468,67 @@ defmodule BackBreeze.Box do
         children
         |> Enum.with_index()
         |> Enum.reduce({[], []}, fn
-        {%{display: %BackBreeze.Grid{}, children: nested_children} = child_box, child_index},
-        child_acc
-        when nested_children != [] ->
-          row_index = div(child_index, box.display.columns)
-          col_index = rem(child_index, box.display.columns)
-          child_left = Enum.at(column_offsets, col_index, 0)
-          child_top = Enum.at(row_offsets, row_index, 0)
+          {%{display: %BackBreeze.Grid{}, children: nested_children} = child_box, child_index},
+          child_acc
+          when nested_children != [] ->
+            row_index = div(child_index, box.display.columns)
+            col_index = rem(child_index, box.display.columns)
+            child_left = Enum.at(column_offsets, col_index, 0)
+            child_top = Enum.at(row_offsets, row_index, 0)
 
-          style = %{
-            child_box.style
-            | width: Enum.at(column_widths, col_index, item_width),
-              height: Enum.at(row_heights, row_index, item_height)
-          }
+            style = %{
+              child_box.style
+              | width: Enum.at(column_widths, col_index, item_width),
+                height: Enum.at(row_heights, row_index, item_height)
+            }
 
-          %{content: content, width: w, height: h, per_item_dimensions: inner_dimensions} =
-            BackBreeze.Grid.render_with_dimensions(
-              child_box.children,
-              child_box.display,
-              style,
-              opts
-            )
+            %{content: content, width: w, height: h, per_item_dimensions: inner_dimensions} =
+              BackBreeze.Grid.render_with_dimensions(
+                child_box.children,
+                child_box.display,
+                style,
+                opts
+              )
 
-          {children, dims} = child_acc
+            {children, dims} = child_acc
 
-          child = %{
-            child_box
-            | children: [],
-              content: content,
-              width: w,
+            child = %{
+              child_box
+              | children: [],
+                content: content,
+                width: w,
+                height: h,
+                state: :rendered,
+                overlay?:
+                  visual_overflow?(style, rendered_height(content), h) ||
+                    contains_overlay_descendants?(child_box)
+            }
+
+            container_dim = %{
+              content_height: h,
+              viewport_height: h,
               height: h,
-              state: :rendered,
-              overlay?:
-                visual_overflow?(style, rendered_height(content), h) ||
-                  contains_overlay_descendants?(child_box)
-          }
+              width: w,
+              viewport_width: w,
+              content_width: w,
+              left: child_left,
+              top: child_top
+            }
 
-          container_dim = %{
-            content_height: h,
-            viewport_height: h,
-            height: h,
-            width: w,
-            viewport_width: w,
-            content_width: w,
-            left: child_left,
-            top: child_top
-          }
+            shifted_inner_dimensions =
+              inner_dimensions
+              |> List.flatten()
+              |> shift_dimensions(child_left, child_top)
 
-          shifted_inner_dimensions =
-            inner_dimensions
-            |> List.flatten()
-            |> shift_dimensions(child_left, child_top)
+            {[child | children], [%{dims: [container_dim | shifted_inner_dimensions]} | dims]}
 
-          {[child | children], [%{dims: [container_dim | shifted_inner_dimensions]} | dims]}
-
-        {child_box, child_index}, child_acc ->
-          row_index = div(child_index, box.display.columns)
-          col_index = rem(child_index, box.display.columns)
-          child_left = Enum.at(column_offsets, col_index, 0)
-          child_top = Enum.at(row_offsets, row_index, 0)
-          {children, dims} = child_acc
-          {[child_box | children], [%{dims: nil, left: child_left, top: child_top} | dims]}
+          {child_box, child_index}, child_acc ->
+            row_index = div(child_index, box.display.columns)
+            col_index = rem(child_index, box.display.columns)
+            child_left = Enum.at(column_offsets, col_index, 0)
+            child_top = Enum.at(row_offsets, row_index, 0)
+            {children, dims} = child_acc
+            {[child_box | children], [%{dims: nil, left: child_left, top: child_top} | dims]}
         end)
         |> then(fn {children, dims} -> {Enum.reverse(children), Enum.reverse(dims)} end)
       end)
@@ -722,57 +735,121 @@ defmodule BackBreeze.Box do
     BenchProfile.measure({__MODULE__, {:combine_children, length(absolutes)}}, fn ->
       if absolutes == [] do
         border = box.style.border
-
-        {start_x, start_y} =
-          case {border.left, border.top} do
-            {nil, nil} -> {0, 0}
-            {_, nil} -> {1, 0}
-            _ -> {1, 1}
-          end
+        {start_x, start_y} = container_origin(border)
 
         {map, width, height} =
           if layer_map_entries?(relative.layer_map) do
-              merge_layer_map(%{}, relative.layer_map, start_x, start_y)
+            merge_layer_map(%{}, relative.layer_map, start_x, start_y)
           else
-              generate_layer_map(relative.content, %{}, start_x, start_y)
+            generate_layer_map(relative.content, %{}, start_x, start_y)
           end
 
         {map, width, height, acc}
       else
-        rendered_boxes = [relative | absolutes] |> Enum.sort_by(& &1.layer)
+        case absolutes do
+          [absolute] ->
+            border = box.style.border
+            {rel_x, rel_y} = container_origin(border)
+            {overlay_x, overlay_y} = resolve_overlay_origin(absolute, box, relative, border, opts)
 
-        border = box.style.border
+            {base_map, base_width, base_height} =
+              if layer_map_entries?(relative.layer_map) do
+                merge_layer_map(%{}, relative.layer_map, rel_x, rel_y)
+              else
+                generate_layer_map(relative.content, %{}, rel_x, rel_y)
+              end
 
-        Enum.reduce(rendered_boxes, {%{}, 0, 0, acc}, fn rendered_box,
-                                                         {layer_map, max_width, max_height, acc} ->
-          {start_x, y} =
-            case {rendered_box.position, border.left, border.top} do
-              {position, _, _} when position in [:absolute, :fixed] ->
-                resolve_overlay_origin(rendered_box, box, relative, border, opts)
+            {map, width, height} =
+              if layer_map_entries?(absolute.layer_map) do
+                merge_layer_map(base_map, absolute.layer_map, overlay_x, overlay_y)
+              else
+                generate_layer_map(absolute.content, base_map, overlay_x, overlay_y)
+              end
 
-              {_, nil, nil} ->
-                {0, 0}
+            {map, max(base_width, width), max(base_height, height), acc}
 
-              {_, _, nil} ->
-                {1, 0}
+          [absolute_one, absolute_two] ->
+            border = box.style.border
 
-              _ ->
-                {1, 1}
-            end
+            [first_box, second_box, third_box] =
+              Enum.sort_by([relative, absolute_one, absolute_two], & &1.layer)
 
-          {map, width, height} =
-            cond do
-              layer_map_entries?(rendered_box.layer_map) ->
-                merge_layer_map(layer_map, rendered_box.layer_map, start_x, y)
+            {map, width, height} =
+              merge_rendered_box(%{}, first_box, box, relative, border, opts)
 
-              true ->
-                generate_layer_map(rendered_box.content, layer_map, start_x, y)
-            end
+            {map, width, height} =
+              merge_rendered_box(map, second_box, box, relative, border, opts, width, height)
 
-          {map, max(max_width, width), max(max_height, height), acc}
-        end)
+            {map, width, height} =
+              merge_rendered_box(map, third_box, box, relative, border, opts, width, height)
+
+            {map, width, height, acc}
+
+          _ ->
+            rendered_boxes = [relative | absolutes] |> Enum.sort_by(& &1.layer)
+
+            border = box.style.border
+
+            Enum.reduce(rendered_boxes, {%{}, 0, 0, acc}, fn rendered_box,
+                                                             {layer_map, max_width, max_height, acc} ->
+              {map, width, height} =
+                merge_rendered_box(
+                  layer_map,
+                  rendered_box,
+                  box,
+                  relative,
+                  border,
+                  opts,
+                  max_width,
+                  max_height
+                )
+
+              {map, width, height, acc}
+            end)
+        end
       end
     end)
+  end
+
+  defp container_origin(border) do
+    case {border.left, border.top} do
+      {nil, nil} -> {0, 0}
+      {_, nil} -> {1, 0}
+      _ -> {1, 1}
+    end
+  end
+
+  defp merge_rendered_box(layer_map, rendered_box, box, relative, border, opts) do
+    merge_rendered_box(layer_map, rendered_box, box, relative, border, opts, 0, 0)
+  end
+
+  defp merge_rendered_box(
+         layer_map,
+         rendered_box,
+         box,
+         relative,
+         border,
+         opts,
+         max_width,
+         max_height
+       ) do
+    {start_x, start_y} =
+      case {rendered_box.position, border.left, border.top} do
+        {position, _, _} when position in [:absolute, :fixed] ->
+          resolve_overlay_origin(rendered_box, box, relative, border, opts)
+
+        _ ->
+          container_origin(border)
+      end
+
+    {map, width, height} =
+      if layer_map_entries?(rendered_box.layer_map) do
+        merge_layer_map(layer_map, rendered_box.layer_map, start_x, start_y)
+      else
+        generate_layer_map(rendered_box.content, layer_map, start_x, start_y)
+      end
+
+    {map, max(max_width, width), max(max_height, height)}
   end
 
   defp merge_layer_map(target_map, source_map, offset_x, offset_y) do
@@ -1334,6 +1411,34 @@ defmodule BackBreeze.Box do
   end
 
   defp clip_child_layer_map(layer_map, _style, _width, _height), do: layer_map
+
+  defp clip_child_layer_map_required?(
+         child_width,
+         child_height,
+         %{border: border},
+         max_x,
+         max_y,
+         false
+       )
+       when is_integer(child_width) and is_integer(child_height) and is_integer(max_x) and
+              is_integer(max_y) do
+    left = if(border.left, do: 1, else: 0)
+    top = if(border.top, do: 1, else: 0)
+    right = max(max_x - if(border.right, do: 1, else: 0), left - 1)
+    bottom = max(max_y - if(border.bottom, do: 1, else: 0), top - 1)
+
+    child_width > max(right - left + 1, 0) or child_height > max(bottom - top + 1, 0)
+  end
+
+  defp clip_child_layer_map_required?(
+         _child_width,
+         _child_height,
+         _style,
+         _max_x,
+         _max_y,
+         _has_overlay_children?
+       ),
+       do: true
 
   defp shift_layer_map(layer_map, shift_x, shift_y) do
     shifted =
