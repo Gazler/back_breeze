@@ -126,7 +126,7 @@ defmodule BackBreeze.Grid do
 
             %{
               item: item,
-              result: render_grid_item(item, style, structured?)
+              result: render_grid_item(item, style, structured?, opts)
             }
           end)
         end)
@@ -365,18 +365,24 @@ defmodule BackBreeze.Grid do
   defp render_grid_item(
          %{state: :rendered, width: width, height: height} = item,
          style,
-         _structured?
+         _structured?,
+         _opts
        )
        when width == style.width and height == style.height do
     %{box: item, dimensions: []}
   end
 
-  defp render_grid_item(item, style, true) do
-    BackBreeze.Box.render_cached_with_dimensions(%{item | style: style}, structured: true)
+  defp render_grid_item(item, style, true, opts) do
+    BackBreeze.Box.render_cached_with_dimensions(%{item | style: style},
+      structured: true,
+      terminal: Keyword.get(opts, :terminal)
+    )
   end
 
-  defp render_grid_item(item, style, false) do
-    BackBreeze.Box.render_cached_with_dimensions(%{item | style: style})
+  defp render_grid_item(item, style, false, opts) do
+    BackBreeze.Box.render_cached_with_dimensions(%{item | style: style},
+      terminal: Keyword.get(opts, :terminal)
+    )
   end
 
   defp shift_dimension(dims, left, top) do
