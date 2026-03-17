@@ -5,25 +5,17 @@ defmodule BackBreeze.RenderCache do
 
   @table :back_breeze_render_cache
   @max_entries 4_096
-  @generation_key {__MODULE__, :generations}
+  @generation_key {__MODULE__, :generation_counter}
 
-  def child_spec(_opts) do
-    %{
-      id: __MODULE__,
-      start: {__MODULE__, :start_link, [[]]}
-    }
-  end
-
-  def start_link(_opts) do
-    GenServer.start_link(__MODULE__, :ok, name: __MODULE__)
+  def start_link(opts \\ []) do
+    GenServer.start_link(__MODULE__, :ok, Keyword.put_new(opts, :name, __MODULE__))
   end
 
   @impl true
   def init(:ok) do
     ensure_table()
-    put_generations(0, -1)
-
-    {:ok, %{current_generation: 0, previous_generation: -1}}
+    generation_ref()
+    {:ok, %{}}
   end
 
   def with_frame(fun) when is_function(fun, 0) do
@@ -55,6 +47,31 @@ defmodule BackBreeze.RenderCache do
     end
   end
 
+  def fetch_stable(key, fun) when is_function(fun, 0) do
+    if disabled?() do
+      fun.()
+    else
+      do_fetch_stable(key, fun)
+    end
+  end
+
+  def clear do
+    ensure_started()
+    :ets.delete_all_objects(@table)
+    :counters.put(generation_ref(), 1, 0)
+  end
+
+  def size do
+    ensure_started()
+    :ets.info(@table, :size)
+  end
+
+  def advance_generation do
+    ensure_started()
+    :counters.add(generation_ref(), 1, 1)
+    :ok
+  end
+
   defp do_fetch(key, fun) do
     ensure_started()
     {current_generation, previous_generation} = generations()
@@ -79,67 +96,56 @@ defmodule BackBreeze.RenderCache do
     end
   end
 
+  defp do_fetch_stable(key, fun) do
+    ensure_started()
+    stable_key = {:stable, key}
+
+    case :ets.lookup(@table, stable_key) do
+      [{^stable_key, value}] ->
+        value
+
+      [] ->
+        value = fun.()
+        maybe_reset_cache()
+        true = :ets.insert(@table, {stable_key, value})
+        value
+    end
+  end
+
   defp disabled? do
     System.get_env("BACK_BREEZE_DISABLE_RENDER_CACHE") in ["1", "true", "TRUE"]
   end
 
-  def clear do
-    ensure_started()
-    :ets.delete_all_objects(@table)
-    put_generations(0, -1)
-  end
-
-  def size do
-    ensure_started()
-    :ets.info(@table, :size)
-  end
-
-  def advance_generation do
-    ensure_started()
-    GenServer.call(__MODULE__, :advance_generation)
-  end
-
-  @impl true
-  def handle_call(
-        :advance_generation,
-        _from,
-        %{current_generation: current, previous_generation: previous} = state
-      ) do
-    delete_generation(previous)
-    next_current = current + 1
-    put_generations(next_current, current)
-
-    {:reply, :ok, %{state | current_generation: next_current, previous_generation: current}}
-  end
-
   defp ensure_started do
-    case Process.whereis(__MODULE__) do
-      nil ->
-        case start_link([]) do
-          {:ok, _pid} -> :ok
-          {:error, {:already_started, _pid}} -> :ok
-        end
-
-      _pid ->
-        :ok
+    if :ets.whereis(@table) == :undefined or :persistent_term.get(@generation_key, nil) == nil do
+      Application.ensure_all_started(:back_breeze)
     end
+
+    :ok
   end
 
   defp generations do
-    :persistent_term.get(@generation_key, {0, -1})
+    current_generation = :counters.get(generation_ref(), 1)
+    {current_generation, current_generation - 1}
   end
 
-  defp put_generations(current_generation, previous_generation) do
-    :persistent_term.put(@generation_key, {current_generation, previous_generation})
-  end
+  defp generation_ref do
+    case :persistent_term.get(@generation_key, nil) do
+      nil ->
+        ref = :counters.new(1, [:atomics])
+        :counters.put(ref, 1, 0)
 
-  defp delete_generation(generation) when generation < 0, do: :ok
+        try do
+          :persistent_term.put(@generation_key, ref)
+          ref
+        rescue
+          ArgumentError ->
+            :persistent_term.get(@generation_key)
+        end
 
-  defp delete_generation(generation) do
-    true =
-      :ets.match_delete(@table, {{generation, :_}, :_})
-
-    :ok
+      ref ->
+        ref
+    end
   end
 
   defp ensure_table do

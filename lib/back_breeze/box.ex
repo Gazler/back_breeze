@@ -85,23 +85,40 @@ defmodule BackBreeze.Box do
   """
 
   def render_with_dimensions(box, opts \\ []) do
-    RenderCache.with_frame(fn ->
-      %{box: box, dimensions: dimensions} =
-        render_and_calc(%{box: box, dimensions: [], id: 0}, opts)
+    terminal = Keyword.get(opts, :terminal)
 
-      dimensions = Enum.sort(dimensions) |> Enum.map(&elem(&1, 1))
-      box = ensure_rendered_content(box)
-      %{box: box, dimensions: dimensions}
+    RenderCache.with_frame(fn ->
+      RenderCache.fetch_stable(
+        {:render_with_dimensions, if(terminal, do: terminal.size, else: nil), box},
+        fn ->
+          %{box: box, dimensions: dimensions} =
+            render_and_calc(%{box: box, dimensions: [], id: 0}, opts)
+
+          dimensions = Enum.sort(dimensions) |> Enum.map(&elem(&1, 1))
+          box = ensure_rendered_content(box)
+          %{box: box, dimensions: dimensions}
+        end
+      )
     end)
   end
 
   @doc false
   def render_structured_with_dimensions(box, opts \\ []) do
-    RenderCache.with_frame(fn ->
-      %{box: box, dimensions: dimensions} =
-        render_and_calc(%{box: box, dimensions: [], id: 0}, Keyword.put(opts, :structured, true))
+    terminal = Keyword.get(opts, :terminal)
 
-      %{box: box, dimensions: Enum.sort(dimensions) |> Enum.map(&elem(&1, 1))}
+    RenderCache.with_frame(fn ->
+      RenderCache.fetch_stable(
+        {:render_structured_with_dimensions, if(terminal, do: terminal.size, else: nil), box},
+        fn ->
+          %{box: box, dimensions: dimensions} =
+            render_and_calc(
+              %{box: box, dimensions: [], id: 0},
+              Keyword.put(opts, :structured, true)
+            )
+
+          %{box: box, dimensions: Enum.sort(dimensions) |> Enum.map(&elem(&1, 1))}
+        end
+      )
     end)
   end
 
@@ -110,7 +127,7 @@ defmodule BackBreeze.Box do
     structured? = Keyword.get(opts, :structured, false)
     terminal = Keyword.get(opts, :terminal)
 
-    RenderCache.fetch(
+    RenderCache.fetch_stable(
       {:render_box, structured?, if(terminal, do: terminal.size, else: nil), box},
       fn ->
         if structured? do
@@ -526,7 +543,7 @@ defmodule BackBreeze.Box do
       {:render_self, box.style, box.content, offset_top,
        if(terminal, do: terminal.size, else: nil)}
 
-    RenderCache.fetch(cache_key, fn ->
+    RenderCache.fetch_stable(cache_key, fn ->
       {content, dimensions} = BackBreeze.Style.calculate_and_render(box.style, box.content, opts)
       max_width = raw_content_width(content)
       {content, dimensions, max_width}
@@ -755,6 +772,7 @@ defmodule BackBreeze.Box do
       end)
 
     children = Enum.reverse(children)
+
     has_overlay_children? = Enum.any?(children, &(overlay_position?(&1) || &1.overlay?))
 
     relative =
@@ -1061,7 +1079,7 @@ defmodule BackBreeze.Box do
   end
 
   defp cached_blank_container_layer_map(box, width, height) do
-    RenderCache.fetch({:blank_container_layer_map, box.style, width, height}, fn ->
+    RenderCache.fetch_stable({:blank_container_layer_map, box.style, width, height}, fn ->
       maybe_generate_blank_container_layer_map(box, width, height)
     end)
   end
@@ -1071,7 +1089,7 @@ defmodule BackBreeze.Box do
   defp cached_generate_layer_map(content, start_x, start_y, layer_map)
        when is_binary(content) and map_size(layer_map) == 0 do
     if start_x == 0 and start_y == 0 do
-      RenderCache.fetch({:generate_layer_map, content}, fn ->
+      RenderCache.fetch_stable({:generate_layer_map, content}, fn ->
         generate_layer_map(content, %{}, 0, 0)
       end)
     else
@@ -1991,9 +2009,12 @@ defmodule BackBreeze.Box do
     area = (bounds.max_x - bounds.start_x + 1) * (bounds.max_y - bounds.start_y + 1)
 
     if area >= 256 and (map_size(layer_map) > 0 or map_size(overlay_layer_map) > 0) do
-      RenderCache.fetch({:layer_maps_to_content, layer_map, overlay_layer_map, bounds}, fn ->
-        layer_maps_to_content(layer_map, overlay_layer_map, bounds)
-      end)
+      RenderCache.fetch_stable(
+        {:layer_maps_to_content, layer_map, overlay_layer_map, bounds},
+        fn ->
+          layer_maps_to_content(layer_map, overlay_layer_map, bounds)
+        end
+      )
     else
       layer_maps_to_content(layer_map, overlay_layer_map, bounds)
     end
