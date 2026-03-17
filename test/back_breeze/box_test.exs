@@ -138,6 +138,23 @@ defmodule BackBreeze.BoxTest do
                """
     end
 
+    test "uses remaining width for width-full children in inline layout" do
+      box =
+        BackBreeze.Box.new(
+          display: :inline,
+          style: %{width: 20},
+          children: [
+            BackBreeze.Box.new(content: "Left"),
+            BackBreeze.Box.new(content: " Mid"),
+            BackBreeze.Box.new(content: "Right", style: %{width: :full, text_align: :right})
+          ]
+        )
+
+      rendered = BackBreeze.Box.render(box)
+
+      assert rendered.content == "Left Mid       Right"
+    end
+
     test "renders a tree with empty absolute nesting" do
       child = BackBreeze.Box.new(content: "Hello", style: %{bold: true, foreground_color: 3})
       nested = BackBreeze.Box.new(children: [child], position: :absolute, top: 0, left: 1)
@@ -188,6 +205,52 @@ defmodule BackBreeze.BoxTest do
                """
                ┌──────┐
                │CDEFGH│
+               └──────┘\
+               """
+    end
+
+    test "preserves the left border when horizontally scrolling overflowing child content" do
+      box =
+        BackBreeze.Box.new(
+          scroll: {1, 2},
+          style: %{border: :line, width: 6, height: 2, overflow: :hidden},
+          children: [
+            BackBreeze.Box.new(content: "AAAAAA"),
+            BackBreeze.Box.new(content: "BBBBBB"),
+            BackBreeze.Box.new(content: "CCCCCC")
+          ]
+        )
+
+      rendered = BackBreeze.Box.render(box)
+
+      assert rendered.content ==
+               """
+               ┌──────┐
+               │BBBB  │
+               │CCCC  │
+               └──────┘\
+               """
+    end
+
+    test "preserves the top border when vertically scrolling overflowing child content" do
+      box =
+        BackBreeze.Box.new(
+          scroll: {1, 0},
+          style: %{border: :line, width: 6, height: 2, overflow: :hidden},
+          children: [
+            BackBreeze.Box.new(content: "AAAAAA"),
+            BackBreeze.Box.new(content: "BBBBBB"),
+            BackBreeze.Box.new(content: "CCCCCC")
+          ]
+        )
+
+      rendered = BackBreeze.Box.render(box)
+
+      assert rendered.content ==
+               """
+               ┌──────┐
+               │BBBBBB│
+               │CCCCCC│
                └──────┘\
                """
     end
@@ -318,6 +381,80 @@ defmodule BackBreeze.BoxTest do
                     
                     
                    X\
+               """
+    end
+
+    test "supports centered absolute positioning relative to the parent" do
+      child = BackBreeze.Box.new(content: "OK", position: :absolute, left: :center, top: :center)
+
+      box =
+        BackBreeze.Box.new(
+          style: %{border: :line, width: 8, height: 4},
+          children: [child]
+        )
+
+      rendered = BackBreeze.Box.render(box)
+
+      assert rendered.content ==
+               """
+               ┌────────┐
+               │        │
+               │   OK   │
+               │        │
+               │        │
+               └────────┘\
+               """
+    end
+
+    test "supports centered fixed positioning relative to the screen" do
+      child = BackBreeze.Box.new(content: "OK", position: :fixed, left: :center, top: :center)
+
+      box =
+        BackBreeze.Box.new(
+          style: %{width: :screen, height: :screen},
+          children: [child]
+        )
+
+      rendered =
+        BackBreeze.Box.render(box, terminal: %Termite.Terminal{size: %{width: 10, height: 4}})
+
+      assert rendered.content ==
+               """
+                         
+                   OK    
+                         
+                         \
+               """
+    end
+
+    test "supports inset-constrained fixed screen overlays" do
+      child =
+        BackBreeze.Box.new(
+          position: :fixed,
+          left: 1,
+          right: 1,
+          top: 1,
+          bottom: 1,
+          style: %{border: :line, width: :screen, height: :screen}
+        )
+
+      box =
+        BackBreeze.Box.new(
+          style: %{width: :screen, height: :screen},
+          children: [child]
+        )
+
+      rendered =
+        BackBreeze.Box.render(box, terminal: %Termite.Terminal{size: %{width: 10, height: 6}})
+
+      assert rendered.content ==
+               """
+                         
+                ┌──────┐ 
+                │      │ 
+                │      │ 
+                └──────┘ 
+                         \
                """
     end
 

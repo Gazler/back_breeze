@@ -99,6 +99,47 @@ defmodule BackBreeze.StyleTest do
                \e[48;5;0m    \e[0m\
                """
     end
+
+    test "aligns content in the center" do
+      style =
+        BackBreeze.Style.width(7)
+        |> BackBreeze.Style.text_align(:center)
+
+      output = BackBreeze.Style.render(style, "Hey")
+
+      assert output == "  Hey  "
+    end
+
+    test "aligns content on the right" do
+      style =
+        BackBreeze.Style.width(7)
+        |> BackBreeze.Style.text_align(:right)
+
+      output = BackBreeze.Style.render(style, "Hey")
+
+      assert output == "    Hey"
+    end
+
+    test "adds bottom padding outside the content height" do
+      style =
+        BackBreeze.Style.height(1)
+        |> BackBreeze.Style.padding_bottom(1)
+
+      output = BackBreeze.Style.render(style, "Hey")
+
+      assert output == "Hey\n   "
+    end
+
+    test "adds directional horizontal padding" do
+      style =
+        BackBreeze.Style.width(3)
+        |> BackBreeze.Style.padding_left(1)
+        |> BackBreeze.Style.padding_right(2)
+
+      output = BackBreeze.Style.render(style, "Hey")
+
+      assert output == " Hey  "
+    end
   end
 
   describe "overflow/2" do
