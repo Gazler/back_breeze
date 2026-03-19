@@ -195,11 +195,21 @@ defmodule BackBreeze.Border do
   end
 
   defp render_with_color("", _), do: ""
-  defp render_with_color(str, %{color: nil}), do: str
 
-  defp render_with_color(str, %{color: color}),
-    do:
-      Termite.Style.ansi256()
-      |> Termite.Style.foreground(color)
-      |> Termite.Style.render_to_string(str)
+  defp render_with_color(str, border) do
+    []
+    |> maybe_add_color(Map.get(border, :color), &Termite.Style.foreground/2)
+    |> maybe_add_color(Map.get(border, :background_color), &Termite.Style.background/2)
+    |> case do
+      [] ->
+        str
+
+      funs ->
+        Enum.reduce(funs, Termite.Style.ansi256(), fn fun, style -> fun.(style) end)
+        |> Termite.Style.render_to_string(str)
+    end
+  end
+
+  defp maybe_add_color(funs, nil, _fun), do: funs
+  defp maybe_add_color(funs, value, fun), do: [fn style -> fun.(style, value) end | funs]
 end

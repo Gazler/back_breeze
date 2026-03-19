@@ -99,6 +99,7 @@ defmodule BackBreeze.Scrollbar do
   def normalize(map, style) when is_map(map) do
     {base, style} = default(map, style)
     fallback_color = Map.get(style, :border_color)
+    fallback_background = Map.get(style, :background_color)
     common_thumb = Map.get(map, :thumb, %{})
     common_track = Map.get(map, :track, %{})
 
@@ -117,7 +118,8 @@ defmodule BackBreeze.Scrollbar do
         common_track,
         common_arrows,
         Map.get(map, :vertical, %{}),
-        fallback_color
+        fallback_color,
+        fallback_background
       )
 
     horizontal =
@@ -127,12 +129,13 @@ defmodule BackBreeze.Scrollbar do
         common_track,
         common_arrows,
         Map.get(map, :horizontal, %{}),
-        fallback_color
+        fallback_color,
+        fallback_background
       )
 
     intersection =
       base.intersection
-      |> merge_segment(Map.get(map, :intersection, %{}), fallback_color)
+      |> merge_segment(Map.get(map, :intersection, %{}), fallback_color, fallback_background)
       |> segment_to_renderable()
 
     scrollbar =
@@ -223,6 +226,16 @@ defmodule BackBreeze.Scrollbar do
       | vertical: Map.new(config.vertical, fn {k, s} -> {k, color_segment(s, color)} end),
         horizontal: Map.new(config.horizontal, fn {k, s} -> {k, color_segment(s, color)} end),
         intersection: color_segment(config.intersection, color)
+    }
+  end
+
+  @spec put_background(t(), term()) :: t()
+  def put_background(%__MODULE__{} = config, color) do
+    %{
+      config
+      | vertical: Map.new(config.vertical, fn {k, s} -> {k, background_segment(s, color)} end),
+        horizontal: Map.new(config.horizontal, fn {k, s} -> {k, background_segment(s, color)} end),
+        intersection: background_segment(config.intersection, color)
     }
   end
 
@@ -717,39 +730,40 @@ defmodule BackBreeze.Scrollbar do
          common_track,
          common_arrows,
          overrides,
-         fallback_color
+         fallback_color,
+         fallback_background
        ) do
     overrides = if is_map(overrides), do: overrides, else: %{}
 
     thumb =
       base.thumb
-      |> merge_segment(common_thumb, fallback_color)
-      |> merge_segment(Map.get(overrides, :thumb, %{}), fallback_color)
-      |> merge_segment(overrides, fallback_color)
+      |> merge_segment(common_thumb, fallback_color, fallback_background)
+      |> merge_segment(Map.get(overrides, :thumb, %{}), fallback_color, fallback_background)
+      |> merge_segment(overrides, fallback_color, fallback_background)
       |> segment_to_renderable()
 
     track =
       base.track
-      |> merge_segment(common_track, fallback_color)
-      |> merge_segment(Map.get(overrides, :track, %{}), fallback_color)
+      |> merge_segment(common_track, fallback_color, fallback_background)
+      |> merge_segment(Map.get(overrides, :track, %{}), fallback_color, fallback_background)
       |> segment_to_renderable()
 
     arrow_start =
       base.arrow_start
-      |> merge_segment(common_arrows, fallback_color)
-      |> merge_segment(Map.get(overrides, :arrow_start, %{}), fallback_color)
+      |> merge_segment(common_arrows, fallback_color, fallback_background)
+      |> merge_segment(Map.get(overrides, :arrow_start, %{}), fallback_color, fallback_background)
       |> segment_to_renderable()
 
     arrow_end =
       base.arrow_end
-      |> merge_segment(common_arrows, fallback_color)
-      |> merge_segment(Map.get(overrides, :arrow_end, %{}), fallback_color)
+      |> merge_segment(common_arrows, fallback_color, fallback_background)
+      |> merge_segment(Map.get(overrides, :arrow_end, %{}), fallback_color, fallback_background)
       |> segment_to_renderable()
 
     %{thumb: thumb, track: track, arrow_start: arrow_start, arrow_end: arrow_end}
   end
 
-  defp merge_segment(%Segment{} = segment, map, fallback_color) when is_map(map) do
+  defp merge_segment(%Segment{} = segment, map, fallback_color, fallback_background) when is_map(map) do
     char = Map.get(map, :char, segment.char)
 
     segment =
@@ -758,7 +772,8 @@ defmodule BackBreeze.Scrollbar do
         | char: char,
           foreground_color:
             Map.get(map, :foreground_color, segment.foreground_color || fallback_color),
-          background_color: Map.get(map, :background_color, segment.background_color),
+          background_color:
+            Map.get(map, :background_color, segment.background_color || fallback_background),
           bold: Map.get(map, :bold, segment.bold),
           italic: Map.get(map, :italic, segment.italic),
           reverse: Map.get(map, :reverse, segment.reverse)
@@ -770,7 +785,8 @@ defmodule BackBreeze.Scrollbar do
     end
   end
 
-  defp merge_segment(%Segment{} = segment, _other, _fallback_color), do: segment
+  defp merge_segment(%Segment{} = segment, _other, _fallback_color, _fallback_background),
+    do: segment
 
   defp renderable_segments(%__MODULE__{} = config) do
     %{
@@ -818,4 +834,9 @@ defmodule BackBreeze.Scrollbar do
   defp maybe_style(style, :italic, true), do: Termite.Style.italic(style)
   defp maybe_style(style, :reverse, true), do: Termite.Style.reverse(style)
   defp maybe_style(style, _key, _enabled), do: style
+
+  defp background_segment(%Segment{background_color: nil} = segment, color),
+    do: segment_to_renderable(%{segment | background_color: color})
+
+  defp background_segment(segment, _color), do: segment
 end

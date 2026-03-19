@@ -146,7 +146,15 @@ defmodule BackBreeze.Style do
   end
 
   def background_color(style \\ %Style{}, color) do
-    %{style | background_color: color}
+    style = %{style | background_color: color}
+
+    case style.scrollbar do
+      %BackBreeze.Scrollbar{vertical: %{track: %{background_color: nil}}} ->
+        %{style | scrollbar: BackBreeze.Scrollbar.put_background(style.scrollbar, color)}
+
+      _ ->
+        style
+    end
   end
 
   def render(style, str, opts \\ []) do
@@ -189,7 +197,10 @@ defmodule BackBreeze.Style do
 
     termite_style = to_termite(style)
 
-    border = %{border | color: style.border_color}
+    border =
+      border
+      |> Map.put(:color, style.border_color)
+      |> Map.put(:background_color, style.background_color)
 
     lines =
       case String.split(str, "\n") do

@@ -105,6 +105,77 @@ defmodule BackBreeze.BoxTest do
                """
     end
 
+    test "renders border cells with the box background color" do
+      box =
+        BackBreeze.Box.new(
+          content: "Hello",
+          style: %{border: :line, border_color: 3, background_color: 0}
+        )
+
+      rendered = BackBreeze.Box.render(box)
+
+      assert rendered.content ==
+               """
+               \e[48;5;0;38;5;3m┌─────┐\e[0m
+               \e[48;5;0;38;5;3m│\e[0m\e[48;5;0mHello\e[0m\e[48;5;0;38;5;3m│\e[0m
+               \e[48;5;0;38;5;3m└─────┘\e[0m\
+               """
+    end
+
+    test "children inherit parent background color by default" do
+      box =
+        BackBreeze.Box.new(
+          style: %{border: :line, background_color: 0},
+          children: [BackBreeze.Box.new(content: "Hello", style: %{foreground_color: 7})]
+        )
+
+      rendered = BackBreeze.Box.render(box)
+
+      assert rendered.content ==
+               """
+               \e[48;5;0m┌─────┐\e[0m
+               \e[48;5;0m│\e[0m\e[48;5;0;38;5;7mHello\e[0m\e[48;5;0m│\e[0m
+               \e[48;5;0m└─────┘\e[0m\
+               """
+    end
+
+    test "child background color overrides inherited parent background" do
+      box =
+        BackBreeze.Box.new(
+          style: %{border: :line, background_color: 0},
+          children: [BackBreeze.Box.new(content: "Hello", style: %{background_color: 1})]
+        )
+
+      rendered = BackBreeze.Box.render(box)
+
+      assert rendered.content ==
+               """
+               \e[48;5;0m┌─────┐\e[0m
+               \e[48;5;0m│\e[0m\e[48;5;1mHello\e[0m\e[48;5;0m│\e[0m
+               \e[48;5;0m└─────┘\e[0m\
+               """
+    end
+
+    test "parent background fills unused interior rows around child content" do
+      box =
+        BackBreeze.Box.new(
+          style: %{border: :line, background_color: 0, width: 8, height: 4},
+          children: [BackBreeze.Box.new(content: "Hello", style: %{foreground_color: 7})]
+        )
+
+      rendered = BackBreeze.Box.render(box)
+
+      assert rendered.content ==
+               """
+               \e[48;5;0m┌────────┐\e[0m
+               \e[48;5;0m│\e[0m\e[48;5;0;38;5;7mHello\e[0m\e[48;5;0m   │\e[0m
+               \e[48;5;0m│        │\e[0m
+               \e[48;5;0m│        │\e[0m
+               \e[48;5;0m│        │\e[0m
+               \e[48;5;0m└────────┘\e[0m\
+               """
+    end
+
     test "renders unicode correctly" do
       child = BackBreeze.Box.new(content: "🍏", style: %{forground_color: 2})
       box = BackBreeze.Box.new(children: [child], style: %{border: :line})
@@ -940,6 +1011,55 @@ defmodule BackBreeze.BoxTest do
       rendered = BackBreeze.Box.render(box)
       assert String.contains?(rendered.content, "\e[38;5;3m│")
       assert String.contains?(rendered.content, "\e[38;5;3m█")
+    end
+
+    test "scrollbar inherits the box background for track and arrows" do
+      children = Enum.map(1..6, &BackBreeze.Box.new(content: "Line #{&1}"))
+
+      box =
+        BackBreeze.Box.new(
+          style: %{
+            border: :line,
+            border_color: 3,
+            background_color: 0,
+            width: 8,
+            height: 3,
+            overflow: :hidden,
+            scrollbar: %{axis: :vertical, arrows: true}
+          },
+          children: children
+        )
+
+      rendered = BackBreeze.Box.render(box)
+      assert String.contains?(rendered.content, "\e[48;5;0;38;5;3m▲")
+      assert String.contains?(rendered.content, "\e[48;5;0;38;5;3m│")
+      assert String.contains?(rendered.content, "\e[48;5;0;38;5;3m▼")
+    end
+
+    test "scrollbar inherits a parent background when the child has none" do
+      child =
+        BackBreeze.Box.new(
+          style: %{
+            border: :line,
+            border_color: 3,
+            width: 8,
+            height: 3,
+            overflow: :hidden,
+            scrollbar: %{axis: :vertical, arrows: true}
+          },
+          children: Enum.map(1..6, &BackBreeze.Box.new(content: "Line #{&1}"))
+        )
+
+      parent =
+        BackBreeze.Box.new(
+          style: %{background_color: 4},
+          children: [child]
+        )
+
+      rendered = BackBreeze.Box.render(parent)
+      assert String.contains?(rendered.content, "\e[48;5;4;38;5;3m▲")
+      assert String.contains?(rendered.content, "\e[48;5;4;38;5;3m│")
+      assert String.contains?(rendered.content, "\e[48;5;4;38;5;3m▼")
     end
   end
 

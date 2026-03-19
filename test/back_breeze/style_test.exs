@@ -44,6 +44,23 @@ defmodule BackBreeze.StyleTest do
       assert output == "┌───────────────┐\n│\e[1;38;5;3mHello World    \e[0m│\n└───────────────┘"
     end
 
+    test "renders borders with the box background color" do
+      style =
+        BackBreeze.Style.width(5)
+        |> BackBreeze.Style.border()
+        |> BackBreeze.Style.border_color(3)
+        |> BackBreeze.Style.background_color(0)
+
+      output = BackBreeze.Style.render(style, "Hello")
+
+      assert output ==
+               """
+               \e[48;5;0;38;5;3m┌─────┐\e[0m
+               \e[48;5;0;38;5;3m│\e[0m\e[48;5;0mHello\e[0m\e[48;5;0;38;5;3m│\e[0m
+               \e[48;5;0;38;5;3m└─────┘\e[0m\
+               """
+    end
+
     test "renders empty lines when a height is specified" do
       style =
         BackBreeze.Style.height(3)

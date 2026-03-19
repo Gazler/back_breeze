@@ -573,6 +573,7 @@ defmodule BackBreeze.Box do
           {%{display: %BackBreeze.Grid{}, children: nested_children} = child_box, child_index},
           child_acc
           when nested_children != [] ->
+            child_box = inherit_parent_background(child_box, box.style)
             row_index = div(child_index, box.display.columns)
             col_index = rem(child_index, box.display.columns)
             child_left = Enum.at(column_offsets, col_index, 0)
@@ -633,6 +634,7 @@ defmodule BackBreeze.Box do
             {[child | children], [%{dims: [container_dim | shifted_inner_dimensions]} | dims]}
 
           {child_box, child_index}, child_acc ->
+            child_box = inherit_parent_background(child_box, box.style)
             row_index = div(child_index, box.display.columns)
             col_index = rem(child_index, box.display.columns)
             child_left = Enum.at(column_offsets, col_index, 0)
@@ -720,6 +722,7 @@ defmodule BackBreeze.Box do
     {children, acc, _used_extent} =
       BenchProfile.measure({__MODULE__, :flow_children}, fn ->
         set_layer(children, [], -1)
+        |> Enum.map(&inherit_parent_background(&1, box.style))
         |> Enum.map(&resolve_absolute_fill_offsets(&1, box.style.border))
         |> resolve_fill_widths(parent_width, box.display, box.style.overflow)
         |> Enum.reduce({[], acc, 0}, fn child, {boxes, child_acc, used_extent} ->
@@ -1103,7 +1106,10 @@ defmodule BackBreeze.Box do
 
   defp maybe_generate_blank_container_layer_map(%{content: "", style: style}, width, height)
        when is_integer(width) and is_integer(height) and width > 0 and height > 0 do
-    border = %{style.border | color: style.border_color || style.border.color}
+    border =
+      style.border
+      |> Map.put(:color, style.border_color || style.border.color)
+      |> Map.put(:background_color, style.background_color)
     border_seq = border_style_sequence(border)
     fill_seq = content_style_sequence(style)
     map = %{}
@@ -1193,12 +1199,19 @@ defmodule BackBreeze.Box do
     end)
   end
 
-  defp border_style_sequence(%{color: nil}), do: ""
+  defp border_style_sequence(border) do
+    []
+    |> maybe_add_color(Map.get(border, :color), &Termite.Style.foreground/2)
+    |> maybe_add_color(Map.get(border, :background_color), &Termite.Style.background/2)
+    |> case do
+      [] ->
+        ""
 
-  defp border_style_sequence(%{color: color}) do
-    Termite.Style.foreground(Termite.Style.ansi256(), color)
-    |> Termite.Style.render_to_string("")
-    |> String.trim_trailing(Termite.Style.reset_code())
+      funs ->
+        Enum.reduce(funs, Termite.Style.ansi256(), fn fun, style -> fun.(style) end)
+        |> Termite.Style.render_to_string("")
+        |> String.trim_trailing(Termite.Style.reset_code())
+    end
   end
 
   defp content_style_sequence(style) do
@@ -2123,6 +2136,17 @@ defmodule BackBreeze.Box do
     next_layer = box.layer || layer
     set_layer(rest, [%{box | layer: next_layer} | result], next_layer)
   end
+
+  defp inherit_parent_background(%{style: style} = child, %{background_color: background_color})
+       when not is_nil(background_color) do
+    if is_nil(style.background_color) do
+      %{child | style: BackBreeze.Style.background_color(style, background_color)}
+    else
+      child
+    end
+  end
+
+  defp inherit_parent_background(child, _parent_style), do: child
 
   defp resolve_overlay_origin(child, parent, border, opts) do
     resolve_overlay_origin(child, parent, nil, border, opts)
