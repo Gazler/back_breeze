@@ -7,10 +7,10 @@ defmodule BackBreeze.Style do
   defstruct bold: false,
             italic: false,
             padding: 0,
-            padding_top: 0,
-            padding_right: 0,
-            padding_bottom: 0,
-            padding_left: 0,
+            padding_top: nil,
+            padding_right: nil,
+            padding_bottom: nil,
+            padding_left: nil,
             reverse: false,
             border: BackBreeze.Border.none(),
             text_align: :left,
@@ -167,26 +167,57 @@ defmodule BackBreeze.Style do
     style = Map.from_struct(style)
 
     string_length = BackBreeze.Utils.string_length(str)
+    source_lines = String.split(str, "\n")
+
+    intrinsic_width =
+      Enum.reduce(source_lines, 0, fn line, acc ->
+        max(acc, BackBreeze.Utils.string_length(line))
+      end)
 
     {border, style} = Map.pop(style, :border)
     {text_align, style} = Map.pop(style, :text_align, :left)
     {overflow, style} = Map.pop(style, :overflow)
     {padding, style} = Map.pop(style, :padding, 0)
-    {padding_top, style} = Map.pop(style, :padding_top, padding)
-    {padding_right, style} = Map.pop(style, :padding_right, padding)
-    {padding_bottom, style} = Map.pop(style, :padding_bottom, padding)
-    {padding_left, style} = Map.pop(style, :padding_left, padding)
-    {width, style} = Map.pop(style, :width, string_length)
-    {height, style} = Map.pop(style, :height, 0)
+    {padding_top, style} = Map.pop(style, :padding_top, nil)
+    {padding_right, style} = Map.pop(style, :padding_right, nil)
+    {padding_bottom, style} = Map.pop(style, :padding_bottom, nil)
+    {padding_left, style} = Map.pop(style, :padding_left, nil)
+    padding_top = if(is_integer(padding_top), do: padding_top, else: padding)
+    padding_right = if(is_integer(padding_right), do: padding_right, else: padding)
+    padding_bottom = if(is_integer(padding_bottom), do: padding_bottom, else: padding)
+    padding_left = if(is_integer(padding_left), do: padding_left, else: padding)
+    {width, style} = Map.pop(style, :width, :auto)
+    {height, style} = Map.pop(style, :height, :auto)
 
-    auto_width = width in [:auto, :full]
+    auto_width = width == :auto
     border_width = if(border.left, do: 1, else: 0) + if(border.right, do: 1, else: 0)
     border_height = if(border.top, do: 1, else: 0) + if(border.bottom, do: 1, else: 0)
 
-    width = if width in [:auto, :full], do: string_length, else: width
-    width = if width == :screen, do: screen_width - border_width, else: width
-    height = if height == :full, do: 0, else: height
-    height = if height == :screen, do: screen_height - border_height, else: height
+    width =
+      cond do
+        width == :auto -> intrinsic_width
+        width in [:screen, :full] -> screen_width
+        true -> width
+      end
+
+    width =
+      if is_integer(width) and not auto_width,
+        do: max(width - border_width - padding_left - padding_right, 0),
+        else: width
+
+    auto_height = height == :auto
+
+    height =
+      cond do
+        height == :auto -> 0
+        height in [:screen, :full] -> screen_height
+        true -> height
+      end
+
+    height =
+      if is_integer(height) and not auto_height,
+        do: max(height - border_height - padding_top - padding_bottom, 0),
+        else: height
 
     str =
       cond do
@@ -212,8 +243,9 @@ defmodule BackBreeze.Style do
     original_height = height
 
     width =
-      if auto_width && length(lines) > 1,
-        do: BackBreeze.Utils.string_length(hd(lines)),
+      if auto_width,
+        do:
+          Enum.reduce(lines, 0, fn line, acc -> max(acc, BackBreeze.Utils.string_length(line)) end),
         else: width
 
     start_pos = Keyword.get(opts, :offset_top, 0)
@@ -243,7 +275,7 @@ defmodule BackBreeze.Style do
 
     bottom_padding_rows = blank_rows(padding_bottom, border, termite_style, inner_width)
 
-    line_count = padding_top + length(lines) + padding_bottom
+    line_count = length(lines)
 
     padding_rows =
       case height - line_count do

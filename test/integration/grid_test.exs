@@ -31,18 +31,18 @@ defmodule BackBreeze.Integration.GridTest do
     assert box.content ==
              """
              ┌───────────────────────────────────────────────────┐
-             │┌───────────────┐┌───────────────┐┌───────────────┐│
-             ││Left           ││Top            ││Right          ││
-             ││123            ││               ││               ││
-             ││456            │└───────────────┘│               ││
-             ││               │┌───────────────┐│               ││
-             ││               ││Middle         ││               ││
-             ││               ││123            ││               ││
-             ││               │└───────────────┘│               ││
-             ││               │┌───────────────┐│               ││
-             ││               ││Bottom         ││               ││
-             ││               ││               ││               ││
-             │└───────────────┘└───────────────┘└───────────────┘│
+             │┌───────────────┐┌─────────────┐┌───────────────┐  │
+             ││Left           ││Top          ││Right          │  │
+             ││123            ││             ││               │  │
+             ││456            │└─────────────┘│               │  │
+             ││               │┌─────────────┐│               │  │
+             ││               ││Middle       ││               │  │
+             ││               ││123          ││               │  │
+             ││               │└─────────────┘│               │  │
+             ││               │┌─────────────┐│               │  │
+             ││               ││Bottom       ││               │  │
+             ││               ││             ││               │  │
+             │└───────────────┘└─────────────┘└───────────────┘  │
              └───────────────────────────────────────────────────┘\
              """
   end
@@ -103,7 +103,7 @@ defmodule BackBreeze.Integration.GridTest do
       )
 
     heights = dimensions |> Enum.drop(1) |> Enum.map(& &1.height)
-    assert heights == [11, 9]
+    assert heights == [9, 7]
   end
 
   test "grid assigns height to bordered children with absolute overlays" do
@@ -154,8 +154,8 @@ defmodule BackBreeze.Integration.GridTest do
                viewport_width: :screen
              },
              %{
-               left: 0,
-               top: 0,
+               left: 1,
+               top: 1,
                width: 17,
                content_width: 17,
                height: 12,
@@ -164,8 +164,8 @@ defmodule BackBreeze.Integration.GridTest do
                viewport_width: 17
              },
              %{
-               left: 17,
-               top: 0,
+               left: 18,
+               top: 1,
                width: 17,
                content_width: 17,
                height: 12,
@@ -174,38 +174,38 @@ defmodule BackBreeze.Integration.GridTest do
                viewport_width: 17
              },
              %{
-               left: 17,
-               top: 0,
-               width: 17,
-               content_width: 17,
+               left: 18,
+               top: 1,
+               width: 15,
+               content_width: 15,
                height: 4,
                content_height: 1,
                viewport_height: 1,
-               viewport_width: 17
+               viewport_width: 15
              },
              %{
-               left: 17,
-               top: 4,
-               width: 17,
-               content_width: 17,
+               left: 18,
+               top: 5,
+               width: 15,
+               content_width: 15,
                height: 4,
                content_height: 2,
                viewport_height: 2,
-               viewport_width: 17
+               viewport_width: 15
              },
              %{
-               left: 17,
-               top: 8,
-               width: 17,
-               content_width: 17,
+               left: 18,
+               top: 9,
+               width: 15,
+               content_width: 15,
                height: 4,
                content_height: 1,
                viewport_height: 1,
-               viewport_width: 17
+               viewport_width: 15
              },
              %{
-               left: 34,
-               top: 0,
+               left: 35,
+               top: 1,
                width: 17,
                content_width: 17,
                height: 12,

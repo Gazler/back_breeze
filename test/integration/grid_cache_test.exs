@@ -21,7 +21,7 @@ defmodule BackBreeze.Integration.GridCacheTest do
     box =
       Box.new(
         children: [child],
-        style: %{width: 10},
+        style: %{width: 10, height: 3},
         display: %Grid{columns: 1}
       )
 
@@ -33,16 +33,16 @@ defmodule BackBreeze.Integration.GridCacheTest do
 
     assert small.content ==
              """
-             ┌──────────┐
-             │X         │
-             └──────────┘\
+             ┌────────┐
+             │X       │
+             └────────┘\
              """
 
     assert large.content ==
              """
-             ┌──────────────┐
-             │X             │
-             └──────────────┘\
+             ┌────────┐
+             │X       │
+             └────────┘\
              """
   end
 end

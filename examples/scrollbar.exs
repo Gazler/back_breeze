@@ -9,9 +9,10 @@ vertical_content =
     "Row #{row}: Lorem ipsum"
   end)
 
-vertical_height = 5
+vertical_viewport_height = 5
+vertical_height = vertical_viewport_height + 2
 vertical_line_count = vertical_content |> String.split("\n") |> length()
-max_vertical_scroll = max(vertical_line_count - vertical_height, 0)
+max_vertical_scroll = max(vertical_line_count - vertical_viewport_height, 0)
 
 vertical_top =
   BackBreeze.Box.new(
@@ -19,7 +20,8 @@ vertical_top =
     scroll: {0, 0},
     style: %{
       border: :line,
-      width: 20,
+      border_color: 3,
+      width: 22,
       height: vertical_height,
       overflow: :hidden,
       scrollbar: true
@@ -32,11 +34,11 @@ vertical_bottom =
     scroll: {max_vertical_scroll, 0},
     style: %{
       border: :line,
-      border_color: 3,
-      width: 20,
+      border_color: 4,
+      width: 22,
       height: vertical_height,
       overflow: :hidden,
-      scrollbar: true
+      scrollbar: %{thumb: %{foreground_color: 2}, track: %{foreground_color: 8}}
     }
   )
 
@@ -46,10 +48,15 @@ horizontal =
     scroll: {0, 10},
     style: %{
       border: :line,
-      width: 18,
-      height: 2,
+      border_color: 5,
+      width: 20,
+      height: 4,
       overflow: :hidden,
-      scrollbar: %{axis: :horizontal}
+      scrollbar: %{
+        axis: :horizontal,
+        thumb: %{foreground_color: 6},
+        track: %{foreground_color: 8}
+      }
     }
   )
 
@@ -63,8 +70,8 @@ both_axes =
     style: %{
       border: :line,
       border_color: 3,
-      width: 18,
-      height: 4,
+      width: 20,
+      height: 6,
       overflow: :hidden,
       scrollbar: %{
         axis: :both,
@@ -77,9 +84,9 @@ both_axes =
 
 height_full =
   BackBreeze.Box.new(
-    style: %{border: :line, width: 24, height: 6, overflow: :hidden},
+    style: %{border: :line, border_color: 6, width: 26, height: 8, overflow: :hidden},
     children: [
-      BackBreeze.Box.new(content: "Fixed header"),
+      BackBreeze.Box.new(content: "Fixed header", style: %{foreground_color: 6}),
       BackBreeze.Box.new(
         content:
           Enum.map_join(1..12, "\n", fn row ->
@@ -89,7 +96,7 @@ height_full =
           width: :full,
           height: :full,
           overflow: :hidden,
-          scrollbar: true
+          scrollbar: %{thumb: %{foreground_color: 2}, track: %{foreground_color: 8}}
         }
       )
     ]

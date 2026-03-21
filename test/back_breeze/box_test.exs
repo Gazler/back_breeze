@@ -4,7 +4,10 @@ defmodule BackBreeze.BoxTest do
   describe "render_with_dimensions/2" do
     test "calculates nested dimensions" do
       child = BackBreeze.Box.new(content: "Hello\nWorld", style: %{border: :line})
-      inner_box = BackBreeze.Box.new(children: [child, child], style: %{border: :line, height: 6})
+
+      inner_box =
+        BackBreeze.Box.new(children: [child, child], style: %{border: :line, height: 10})
+
       box = BackBreeze.Box.new(children: [inner_box])
       %{box: box, dimensions: dimensions} = BackBreeze.Box.render_with_dimensions(box)
 
@@ -17,49 +20,46 @@ defmodule BackBreeze.BoxTest do
                │└─────┘│
                │┌─────┐│
                ││Hello││
+               ││World││
+               │└─────┘│
                └───────┘\
                """
 
       assert dimensions == [
                %{
+                 height: 10,
+                 content_height: 10,
+                 viewport_height: 10
+               },
+               %{
                  left: 0,
                  top: 0,
                  width: 9,
-                 height: 8,
+                 height: 10,
                  content_width: 9,
                  content_height: 8,
                  viewport_height: 8,
                  viewport_width: 9
                },
                %{
-                 left: 0,
-                 top: 0,
-                 width: 7,
-                 height: 8,
-                 content_width: 7,
-                 content_height: 8,
-                 viewport_height: 6,
-                 viewport_width: 7
-               },
-               %{
                  left: 1,
                  top: 1,
                  width: 7,
-                 viewport_width: 7,
-                 content_width: 7,
                  height: 4,
+                 content_width: 7,
                  content_height: 2,
-                 viewport_height: 2
+                 viewport_height: 2,
+                 viewport_width: 7
                },
                %{
                  left: 1,
                  top: 5,
                  width: 7,
-                 viewport_width: 7,
-                 content_width: 7,
                  height: 4,
+                 content_width: 7,
                  content_height: 2,
-                 viewport_height: 2
+                 viewport_height: 2,
+                 viewport_width: 7
                }
              ]
     end
@@ -159,7 +159,7 @@ defmodule BackBreeze.BoxTest do
     test "parent background fills unused interior rows around child content" do
       box =
         BackBreeze.Box.new(
-          style: %{border: :line, background_color: 0, width: 8, height: 4},
+          style: %{border: :line, background_color: 0, width: 10, height: 6},
           children: [BackBreeze.Box.new(content: "Hello", style: %{foreground_color: 7})]
         )
 
@@ -236,7 +236,6 @@ defmodule BackBreeze.BoxTest do
       assert rendered.content ==
                """
                ┌\e[1;38;5;3mHello\e[0m┐
-               │     │
                └─────┘\
                """
     end
@@ -246,7 +245,7 @@ defmodule BackBreeze.BoxTest do
 
       box =
         BackBreeze.Box.new(
-          style: %{border: :line, width: 6, height: 1, overflow: :hidden},
+          style: %{border: :line, width: 8, height: 3, overflow: :hidden},
           children: [child]
         )
 
@@ -266,7 +265,7 @@ defmodule BackBreeze.BoxTest do
       box =
         BackBreeze.Box.new(
           scroll: {0, 2},
-          style: %{border: :line, width: 6, height: 1, overflow: :hidden},
+          style: %{border: :line, width: 8, height: 3, overflow: :hidden},
           children: [child]
         )
 
@@ -284,7 +283,7 @@ defmodule BackBreeze.BoxTest do
       box =
         BackBreeze.Box.new(
           scroll: {1, 2},
-          style: %{border: :line, width: 6, height: 2, overflow: :hidden},
+          style: %{border: :line, width: 8, height: 4, overflow: :hidden},
           children: [
             BackBreeze.Box.new(content: "AAAAAA"),
             BackBreeze.Box.new(content: "BBBBBB"),
@@ -307,7 +306,7 @@ defmodule BackBreeze.BoxTest do
       box =
         BackBreeze.Box.new(
           scroll: {1, 0},
-          style: %{border: :line, width: 6, height: 2, overflow: :hidden},
+          style: %{border: :line, width: 8, height: 4, overflow: :hidden},
           children: [
             BackBreeze.Box.new(content: "AAAAAA"),
             BackBreeze.Box.new(content: "BBBBBB"),
@@ -331,7 +330,7 @@ defmodule BackBreeze.BoxTest do
 
       box =
         BackBreeze.Box.new(
-          style: %{border: :line, width: 6, height: 1, overflow: :hidden},
+          style: %{border: :line, width: 8, height: 3, overflow: :hidden},
           children: [child]
         )
 
@@ -396,7 +395,7 @@ defmodule BackBreeze.BoxTest do
 
       box =
         BackBreeze.Box.new(
-          style: %{border: :line, width: 8, height: 4},
+          style: %{border: :line, width: 10, height: 6},
           children: [overlay, label]
         )
 
@@ -418,7 +417,7 @@ defmodule BackBreeze.BoxTest do
 
       box =
         BackBreeze.Box.new(
-          style: %{border: :line, width: 8, height: 4},
+          style: %{border: :line, width: 10, height: 6},
           children: [child]
         )
 
@@ -460,7 +459,7 @@ defmodule BackBreeze.BoxTest do
 
       box =
         BackBreeze.Box.new(
-          style: %{border: :line, width: 8, height: 4},
+          style: %{border: :line, width: 10, height: 6},
           children: [child]
         )
 
@@ -529,12 +528,41 @@ defmodule BackBreeze.BoxTest do
                """
     end
 
+    test "reports inset-constrained fixed screen overlay dimensions from the constrained outer size" do
+      child =
+        BackBreeze.Box.new(
+          position: :fixed,
+          left: 1,
+          right: 1,
+          top: 1,
+          bottom: 1,
+          style: %{border: :line, width: :screen, height: :screen}
+        )
+
+      box =
+        BackBreeze.Box.new(
+          style: %{width: :screen, height: :screen},
+          children: [child]
+        )
+
+      %{dimensions: dimensions} =
+        BackBreeze.Box.render_with_dimensions(
+          box,
+          terminal: %Termite.Terminal{size: %{width: 10, height: 6}}
+        )
+
+      assert Enum.any?(dimensions, fn
+               %{left: 1, top: 1, width: 8, height: 4} -> true
+               _ -> false
+             end)
+    end
+
     test "clips children with width-screen overflow hidden" do
       child = BackBreeze.Box.new(content: "ABCDEFGHIJKLMNOPQRST")
 
       box =
         BackBreeze.Box.new(
-          style: %{border: :line, width: :screen, height: 1, overflow: :hidden},
+          style: %{border: :line, width: :screen, height: 3, overflow: :hidden},
           children: [child]
         )
 
@@ -560,7 +588,7 @@ defmodule BackBreeze.BoxTest do
 
       box =
         BackBreeze.Box.new(
-          style: %{border: :line, width: 6, height: 5, overflow: :hidden},
+          style: %{border: :line, width: 8, height: 7, overflow: :hidden},
           children: [header, body]
         )
 
@@ -583,7 +611,7 @@ defmodule BackBreeze.BoxTest do
 
       box =
         BackBreeze.Box.new(
-          style: %{border: :line, width: 6, height: 3, overflow: :hidden, scrollbar: true},
+          style: %{border: :line, width: 8, height: 5, overflow: :hidden, scrollbar: true},
           children: [child]
         )
 
@@ -605,7 +633,7 @@ defmodule BackBreeze.BoxTest do
       box =
         BackBreeze.Box.new(
           scroll: {3, 0},
-          style: %{border: :line, width: 6, height: 3, overflow: :hidden, scrollbar: true},
+          style: %{border: :line, width: 8, height: 5, overflow: :hidden, scrollbar: true},
           children: [child]
         )
 
@@ -626,7 +654,7 @@ defmodule BackBreeze.BoxTest do
         BackBreeze.Box.new(
           content: "AAAAAA\nBBBBBB\nCCCCCC\nDDDDDD\nEEEEEE\nFFFFFF",
           scroll: {1, 0},
-          style: %{border: :line, width: 6, height: 3, overflow: :hidden, scrollbar: true}
+          style: %{border: :line, width: 8, height: 5, overflow: :hidden, scrollbar: true}
         )
 
       rendered = BackBreeze.Box.render(box)
@@ -648,8 +676,8 @@ defmodule BackBreeze.BoxTest do
         BackBreeze.Box.new(
           style: %{
             border: :line,
-            width: 6,
-            height: 3,
+            width: 8,
+            height: 5,
             overflow: :hidden,
             scrollbar: %{
               axis: :vertical,
@@ -673,8 +701,8 @@ defmodule BackBreeze.BoxTest do
         BackBreeze.Box.new(
           style: %{
             border: :line,
-            width: 6,
-            height: 3,
+            width: 8,
+            height: 5,
             overflow: :hidden,
             scrollbar: %{axis: :vertical, placement: :start}
           },
@@ -700,8 +728,8 @@ defmodule BackBreeze.BoxTest do
         BackBreeze.Box.new(
           style: %{
             border: :line,
-            width: 5,
-            height: 2,
+            width: 7,
+            height: 4,
             overflow: :hidden,
             scrollbar: %{axis: :horizontal}
           },
@@ -724,7 +752,7 @@ defmodule BackBreeze.BoxTest do
 
       box =
         BackBreeze.Box.new(
-          style: %{border: :line, width: 6, height: 3, overflow: :hidden, scrollbar: true},
+          style: %{border: :line, width: 8, height: 5, overflow: :hidden, scrollbar: true},
           children: [child]
         )
 
@@ -741,8 +769,8 @@ defmodule BackBreeze.BoxTest do
         BackBreeze.Box.new(
           style: %{
             border: :line,
-            width: 6,
-            height: 3,
+            width: 8,
+            height: 5,
             overflow: :hidden,
             scrollbar: %{axis: :vertical, sizing: {:fixed, 1}}
           },
@@ -808,8 +836,8 @@ defmodule BackBreeze.BoxTest do
         BackBreeze.Box.new(
           style: %{
             border: :line,
-            width: 6,
-            height: 1,
+            width: 8,
+            height: 3,
             overflow: :hidden,
             scrollbar: %{axis: :vertical, show: :always}
           },
@@ -833,7 +861,7 @@ defmodule BackBreeze.BoxTest do
         BackBreeze.Box.new(
           content: content,
           scroll: {26, 0},
-          style: %{border: :line, width: 6, height: 4, overflow: :hidden, scrollbar: true}
+          style: %{border: :line, width: 8, height: 6, overflow: :hidden, scrollbar: true}
         )
 
       rendered = BackBreeze.Box.render(box)
@@ -857,8 +885,8 @@ defmodule BackBreeze.BoxTest do
           scroll: {1, 3},
           style: %{
             border: :line,
-            width: 6,
-            height: 4,
+            width: 8,
+            height: 6,
             overflow: :hidden,
             scrollbar: %{axis: :both, arrows: true}
           },
@@ -881,8 +909,8 @@ defmodule BackBreeze.BoxTest do
         BackBreeze.Box.new(
           style: %{
             border: :line,
-            width: 6,
-            height: 4,
+            width: 8,
+            height: 6,
             overflow: :hidden,
             scrollbar: %{axis: :both, arrows: true}
           },
@@ -903,8 +931,8 @@ defmodule BackBreeze.BoxTest do
         BackBreeze.Box.new(
           style: %{
             border: :line,
-            width: 6,
-            height: 4,
+            width: 8,
+            height: 6,
             overflow: :hidden,
             scrollbar: %{axis: :both, arrows: true}
           },
@@ -924,8 +952,8 @@ defmodule BackBreeze.BoxTest do
         BackBreeze.Box.new(
           style: %{
             border: :line,
-            width: 5,
-            height: 2,
+            width: 7,
+            height: 4,
             overflow: :hidden,
             scrollbar: %{
               axis: :horizontal,
@@ -949,7 +977,7 @@ defmodule BackBreeze.BoxTest do
       box =
         BackBreeze.Box.new(
           scroll: {2, 0},
-          style: %{border: :line, width: 1, height: 7, overflow: :hidden, scrollbar: true},
+          style: %{border: :line, width: 3, height: 9, overflow: :hidden, scrollbar: true},
           children: [absolute_child | relative_children]
         )
 
@@ -977,8 +1005,8 @@ defmodule BackBreeze.BoxTest do
           scroll: {1, 3},
           style: %{
             border: :line,
-            width: 6,
-            height: 4,
+            width: 8,
+            height: 6,
             overflow: :hidden,
             scrollbar: %{axis: :both, arrows: %{foreground_color: 2}}
           },
@@ -1022,8 +1050,8 @@ defmodule BackBreeze.BoxTest do
             border: :line,
             border_color: 3,
             background_color: 0,
-            width: 8,
-            height: 3,
+            width: 10,
+            height: 5,
             overflow: :hidden,
             scrollbar: %{axis: :vertical, arrows: true}
           },
@@ -1042,8 +1070,8 @@ defmodule BackBreeze.BoxTest do
           style: %{
             border: :line,
             border_color: 3,
-            width: 8,
-            height: 3,
+            width: 10,
+            height: 5,
             overflow: :hidden,
             scrollbar: %{axis: :vertical, arrows: true}
           },
@@ -1087,15 +1115,15 @@ defmodule BackBreeze.BoxTest do
       box = BackBreeze.Box.new(children: [child], style: %{border: :line, width: 10})
       rendered = BackBreeze.Box.render(box)
 
-      # width: 10 is content width, so outer box is 12 wide (10 + 2 border)
-      # child fills to 10 content - 2 (child border) = 8 content, 10 total
+      # width: 10 is total outer width, so parent content width is 8
+      # child width-full fills that 8-wide content area, yielding 6 inner columns once bordered
       assert rendered.content ==
                """
-               ┌──────────┐
-               │┌────────┐│
-               ││Hi      ││
-               │└────────┘│
-               └──────────┘\
+               ┌────────┐
+               │┌──────┐│
+               ││Hi    ││
+               │└──────┘│
+               └────────┘\
                """
     end
 
@@ -1110,14 +1138,13 @@ defmodule BackBreeze.BoxTest do
 
       rendered = BackBreeze.Box.render(box)
 
-      # width: 8 is content width, outer box is 10 wide (8 + 2 border)
-      # children fill to parent_width = 8 (no child border to subtract)
+      # width: 8 is total outer width, so parent content width is 6
       assert rendered.content ==
                """
-               ┌────────┐
-               │A       │
-               │B       │
-               └────────┘\
+               ┌──────┐
+               │A     │
+               │B     │
+               └──────┘\
                """
     end
   end
@@ -1160,6 +1187,20 @@ defmodule BackBreeze.BoxTest do
                         Two   +  
                One lineLinesLines\
                """
+    end
+  end
+
+  describe "padding with children" do
+    test "insets child content once inside directional padding" do
+      box =
+        BackBreeze.Box.new(
+          style: %{width: 10, height: 4, padding_top: 1, padding_left: 1},
+          children: [BackBreeze.Box.new(content: "X")]
+        )
+
+      rendered = BackBreeze.Box.render(box)
+
+      assert rendered.content == "          \n X        \n          \n          "
     end
   end
 end

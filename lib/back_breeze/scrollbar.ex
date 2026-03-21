@@ -234,7 +234,8 @@ defmodule BackBreeze.Scrollbar do
     %{
       config
       | vertical: Map.new(config.vertical, fn {k, s} -> {k, background_segment(s, color)} end),
-        horizontal: Map.new(config.horizontal, fn {k, s} -> {k, background_segment(s, color)} end),
+        horizontal:
+          Map.new(config.horizontal, fn {k, s} -> {k, background_segment(s, color)} end),
         intersection: background_segment(config.intersection, color)
     }
   end
@@ -763,7 +764,8 @@ defmodule BackBreeze.Scrollbar do
     %{thumb: thumb, track: track, arrow_start: arrow_start, arrow_end: arrow_end}
   end
 
-  defp merge_segment(%Segment{} = segment, map, fallback_color, fallback_background) when is_map(map) do
+  defp merge_segment(%Segment{} = segment, map, fallback_color, fallback_background)
+       when is_map(map) do
     char = Map.get(map, :char, segment.char)
 
     segment =

@@ -28,7 +28,7 @@ defmodule BackBreeze.AbsoluteTest do
 
     box =
       BackBreeze.Box.new(%{
-        style: %{border: :line, width: size.width * 2, height: size.height},
+        style: %{border: :line, width: size.width * 2 + 2, height: size.height + 2},
         children: [a, b, c, title]
       })
       |> BackBreeze.Box.render()
@@ -41,9 +41,9 @@ defmodule BackBreeze.AbsoluteTest do
              │                              │
              │             ┌─\e[38;5;2mccccc\e[0m          │
              │             │aaaa│           │
-             │             │    │           │
-             │             │    │           │
              │             └────┘           │
+             │                              │
+             │                              │
              │                              │
              │                              │
              └──────────────────────────────┘\

@@ -287,212 +287,225 @@ defmodule BackBreeze.Box do
       end)
 
     structured? = Keyword.get(opts, :structured, false)
+    children_content_height = content_height(children, box.display)
 
-    if not structured? and plain_content_container?(box, child_layer_map, has_overlay_children?) do
-      render_plain_content_container(
-        acc,
-        prev_id,
-        child_layer_map,
-        child_width,
-        child_height,
-        child_layer,
-        opts
-      )
-    else
-      style_width = if box.style.width == :auto, do: 0, else: box.style.width
+    cond do
+      not structured? and
+        is_binary(child_layer_map) and box.scroll == {0, 0} and
+        box.style.scrollbar == false and not has_overlay_children? and
+        plain_wrapper_style?(box) and
+        box.style.width not in [:full, :screen] and
+          box.style.height not in [:full, :screen] ->
+        render_wrapped_content_container(
+          acc,
+          prev_id,
+          box,
+          child_layer_map,
+          child_layer,
+          opts
+        )
 
-      width =
-        cond do
-          box.style.overflow == :hidden ->
-            box.style.width
+      not structured? and plain_content_container?(box, child_layer_map, has_overlay_children?) ->
+        render_plain_content_container(
+          acc,
+          prev_id,
+          child_layer_map,
+          child_width,
+          child_height,
+          child_layer,
+          opts
+        )
 
-          is_integer(box.style.width) and box.style.width > 0 ->
-            box.style.width
+      true ->
+        style_width = if box.style.width == :auto, do: 0, else: box.style.width
 
-          true ->
-            max(style_width, child_width)
-        end
+        width =
+          cond do
+            box.style.overflow == :hidden ->
+              box.style.width
 
-      style_height = if box.style.height == :auto, do: 0, else: box.style.height
+            is_integer(box.style.width) and box.style.width > 0 ->
+              box.style.width
 
-      height =
-        cond do
-          box.style.overflow == :hidden ->
-            box.style.height
+            true ->
+              max(
+                style_width,
+                child_width + padding_horizontal(box.style) + border_horizontal(box.style.border)
+              )
+          end
 
-          is_integer(box.style.height) and box.style.height > 0 ->
-            box.style.height
+        style_height = if box.style.height == :auto, do: 0, else: box.style.height
 
-          true ->
-            max(
-              style_height,
-              child_height +
-                padding_vertical(box.style) +
-                if(padding_vertical(box.style) > 0, do: 1, else: 0)
-            )
-        end
+        height =
+          cond do
+            box.style.overflow == :hidden ->
+              box.style.height
 
-      style = %{box.style | width: width, height: height}
+            is_integer(box.style.height) and box.style.height > 0 ->
+              box.style.height
 
-      # We don't want offset to apply twice in cases when there are children.
-      {content, dimensions, _width} =
-        BenchProfile.measure({__MODULE__, :render_self}, fn ->
-          render_self(%{box | width: width, height: height, style: style, scroll: {0, 0}}, opts)
-        end)
+            true ->
+              max(
+                style_height,
+                children_content_height +
+                  padding_vertical(box.style) +
+                  border_vertical(box.style.border)
+              )
+          end
 
-      border_rows =
-        if(box.style.border.top, do: 1, else: 0) +
-          if box.style.border.bottom, do: 1, else: 0
+        style = %{box.style | width: width, height: height}
 
-      dimensions = %{
-        content_height: content_height(children, box.display),
-        viewport_height: dimensions.height - border_rows,
-        viewport_width: width,
-        height: dimensions.height,
-        width: width
-      }
-
-      dimensions =
-        if box.style.height in [:auto, :full] ||
-             (is_integer(box.style.height) && box.style.height <= 0 && box.style.width != :screen) do
-          resolved_height = max(dimensions.height, dimensions.content_height)
-
-          %{
-            dimensions
-            | height: resolved_height,
-              viewport_height: max(dimensions.viewport_height, resolved_height - border_rows)
-          }
-        else
-          dimensions
-        end
-
-      dimensions =
-        dimensions
-        |> Map.put(:width, width)
-        |> Map.put_new(:viewport_width, width)
-        |> Map.put_new(:content_width, width)
-        |> Map.put(:left, 0)
-        |> Map.put(:top, 0)
-
-      acc = %{acc | dimensions: [{prev_id, dimensions} | acc.dimensions], id: acc.id}
-
-      rendered_width = raw_content_width(content)
-
-      {layer_map, max_width, max_height} =
-        BenchProfile.measure({__MODULE__, :container_base_layer}, fn ->
-          cached_blank_container_layer_map(box, rendered_width, dimensions.height) ||
-            cached_generate_layer_map(content)
-        end)
-
-      max_height = max(max_height, max(rendered_height(content) - 1, 0))
-
-      {offset_top, offset_left} = box.scroll
-
-      child_layer_map =
-        if offset_left > 0 do
-          shift_layer_map(child_layer_map, -offset_left, 0)
-        else
-          child_layer_map
-        end
-
-      clip_relative_children? =
-        box.style.overflow == :hidden ||
-          (is_integer(box.style.height) && box.style.height > 0 && !has_overlay_children?)
-
-      child_layer_map =
-        if clip_relative_children? and
-             (offset_left > 0 or
-                offset_top > 0 or
-                clip_child_layer_map_required?(
-                  child_width,
-                  child_height,
-                  box.style,
-                  max_width,
-                  max_height,
-                  has_overlay_children?
-                )) do
-          BenchProfile.measure({__MODULE__, :clip_child_layer_map}, fn ->
-            clip_child_layer_map(child_layer_map, box.style, max_width, max_height)
+        # We don't want offset to apply twice in cases when there are children.
+        {content, dimensions, _width} =
+          BenchProfile.measure({__MODULE__, :render_self}, fn ->
+            render_self(%{box | width: width, height: height, style: style, scroll: {0, 0}}, opts)
           end)
-        else
-          child_layer_map
-        end
 
-      max_width =
-        if box.style.overflow == :hidden do
-          max_width
-        else
-          max(max_width, child_width)
-        end
+        border_rows =
+          if(box.style.border.top, do: 1, else: 0) +
+            if box.style.border.bottom, do: 1, else: 0
 
-      max_height =
-        cond do
-          box.style.overflow == :hidden ->
-            max_height
+        dimensions = %{
+          content_height: children_content_height,
+          viewport_height: dimensions.height - border_rows,
+          viewport_width: width,
+          height: dimensions.height,
+          width: width
+        }
 
-          box.style.height in [:auto, :full] ||
-              (is_integer(box.style.height) && box.style.height <= 0) ->
-            max(max_height, child_height)
+        dimensions =
+          if box.style.height in [:auto, :full] ||
+               (is_integer(box.style.height) && box.style.height <= 0 &&
+                  box.style.width != :screen) do
+            resolved_height = max(dimensions.height, dimensions.content_height)
 
-          has_overlay_children? ->
-            max(max_height, child_height)
+            %{
+              dimensions
+              | height: resolved_height,
+                viewport_height: max(dimensions.viewport_height, resolved_height - border_rows)
+            }
+          else
+            dimensions
+          end
 
-          true ->
-            max_height
-        end
+        dimensions =
+          dimensions
+          |> Map.put(:width, width)
+          |> Map.put_new(:viewport_width, width)
+          |> Map.put_new(:content_width, width)
+          |> Map.put(:left, 0)
+          |> Map.put(:top, 0)
 
-      child_layer_map =
-        BenchProfile.measure({__MODULE__, :scrollbar_layer_map}, fn ->
-          BackBreeze.Scrollbar.add_to_layer_map(child_layer_map, %{
-            style: box.style,
-            scroll: box.scroll,
-            content_height: dimensions.content_height,
-            content_width: child_width,
-            max_x: max_width,
-            max_y: max_height
-          })
-        end)
+        acc = %{acc | dimensions: [{prev_id, dimensions} | acc.dimensions], id: acc.id}
 
-      {child_offset_left, child_offset_top} = padding_origin(box.style)
+        rendered_width = raw_content_width(content)
 
-      child_layer_map =
-        if child_offset_left > 0 or child_offset_top > 0 do
-          shift_layer_map(child_layer_map, child_offset_left, child_offset_top)
-        else
-          child_layer_map
-        end
+        {layer_map, max_width, max_height} =
+          BenchProfile.measure({__MODULE__, :container_base_layer}, fn ->
+            cached_blank_container_layer_map(box, rendered_width, dimensions.height) ||
+              cached_generate_layer_map(content)
+          end)
 
-      merged_layer_map =
-        BenchProfile.measure({__MODULE__, :merge_layer_maps}, fn ->
-          Map.merge(layer_map, child_layer_map)
-        end)
+        max_height = max(max_height, max(rendered_height(content) - 1, 0))
 
-      content =
-        if structured? do
-          nil
-        else
-          BenchProfile.measure({__MODULE__, :layer_maps_to_content}, fn ->
-            cached_layer_maps_to_content(layer_map, child_layer_map, %{
-              start_x: 0,
-              start_y: 0,
+        {offset_top, offset_left} = box.scroll
+
+        child_layer_map =
+          if offset_left > 0 do
+            shift_layer_map(child_layer_map, -offset_left, 0)
+          else
+            child_layer_map
+          end
+
+        clip_relative_children? =
+          box.style.overflow == :hidden ||
+            (is_integer(box.style.height) && box.style.height > 0 && !has_overlay_children?)
+
+        child_layer_map =
+          if clip_relative_children? and
+               (offset_left > 0 or
+                  offset_top > 0 or
+                  clip_child_layer_map_required?(
+                    child_width,
+                    child_height,
+                    box.style,
+                    max_width,
+                    max_height,
+                    has_overlay_children?
+                  )) do
+            BenchProfile.measure({__MODULE__, :clip_child_layer_map}, fn ->
+              clip_child_layer_map(child_layer_map, box.style, max_width, max_height)
+            end)
+          else
+            child_layer_map
+          end
+
+        max_width =
+          if box.style.overflow == :hidden do
+            max_width
+          else
+            max(max_width, child_width)
+          end
+
+        max_height =
+          cond do
+            box.style.overflow == :hidden ->
+              max_height
+
+            box.style.height in [:auto, :full] ||
+                (is_integer(box.style.height) && box.style.height <= 0) ->
+              max(max_height, child_height)
+
+            has_overlay_children? ->
+              max(max_height, child_height)
+
+            true ->
+              max_height
+          end
+
+        child_layer_map =
+          BenchProfile.measure({__MODULE__, :scrollbar_layer_map}, fn ->
+            BackBreeze.Scrollbar.add_to_layer_map(child_layer_map, %{
+              style: box.style,
+              scroll: box.scroll,
+              content_height: dimensions.content_height,
+              content_width: child_width,
               max_x: max_width,
               max_y: max_height
             })
           end)
-        end
 
-      box = %{
-        box
-        | content: content,
-          width: max_width + 1,
-          height: max_height + 1,
-          layer: max(box.layer || 0, child_layer || 0),
-          state: :rendered,
-          layer_map: merged_layer_map,
-          overlay?: has_overlay_children?
-      }
+        merged_layer_map =
+          BenchProfile.measure({__MODULE__, :merge_layer_maps}, fn ->
+            Map.merge(layer_map, child_layer_map)
+          end)
 
-      %{acc | box: box}
+        content =
+          if structured? do
+            nil
+          else
+            BenchProfile.measure({__MODULE__, :layer_maps_to_content}, fn ->
+              cached_layer_maps_to_content(layer_map, child_layer_map, %{
+                start_x: 0,
+                start_y: 0,
+                max_x: max_width,
+                max_y: max_height
+              })
+            end)
+          end
+
+        box = %{
+          box
+          | content: content,
+            width: max_width + 1,
+            height: max_height + 1,
+            layer: max(box.layer || 0, child_layer || 0),
+            state: :rendered,
+            layer_map: merged_layer_map,
+            overlay?: has_overlay_children?
+        }
+
+        %{acc | box: box}
     end
   end
 
@@ -534,10 +547,37 @@ defmodule BackBreeze.Box do
     %{acc | box: box, dimensions: [{prev_id, dimensions} | acc.dimensions], id: acc.id}
   end
 
+  defp render_wrapped_content_container(
+         %{box: box} = acc,
+         prev_id,
+         box,
+         child_content,
+         child_layer,
+         opts
+       ) do
+    {content, dimensions, width} =
+      render_self(%{box | content: child_content, children: [], scroll: {0, 0}}, opts)
+
+    box = %{
+      box
+      | content: content,
+        width: width,
+        height: dimensions.height,
+        layer: max(box.layer || 0, child_layer || 0),
+        state: :rendered,
+        children: [],
+        layer_map: %{},
+        overlay?: false
+    }
+
+    %{acc | box: box, dimensions: [{prev_id, dimensions} | acc.dimensions], id: acc.id}
+  end
+
   defp render_self(box, opts) do
     {offset_top, _} = box.scroll
     opts = Keyword.put(opts, :offset_top, offset_top)
     terminal = Keyword.get(opts, :terminal)
+    box = normalize_render_self_box(box)
 
     cache_key =
       {:render_self, box.style, box.content, offset_top,
@@ -548,6 +588,25 @@ defmodule BackBreeze.Box do
       max_width = raw_content_width(content)
       {content, dimensions, max_width}
     end)
+  end
+
+  defp normalize_render_self_box(box) do
+    style =
+      box.style
+      |> maybe_resolve_render_self_extent(:width, box.width)
+      |> maybe_resolve_render_self_extent(:height, box.height)
+
+    %{box | style: style}
+  end
+
+  defp maybe_resolve_render_self_extent(style, _field, value) when not is_integer(value),
+    do: style
+
+  defp maybe_resolve_render_self_extent(style, field, value) do
+    case Map.get(style, field) do
+      extent when extent in [:full, :screen] -> Map.put(style, field, value)
+      _ -> style
+    end
   end
 
   defp render_children(
@@ -683,6 +742,13 @@ defmodule BackBreeze.Box do
           {id + length(grouped), Enum.reverse(entries, acc_d)}
       end)
       |> then(fn {final_id, dims} -> {final_id, Enum.reverse(dims)} end)
+
+    {content_left, content_top} = content_origin(box.style)
+
+    new_dims =
+      Enum.map(new_dims, fn {id, dims} ->
+        {id, shift_dimension(dims, content_left, content_top)}
+      end)
 
     acc = %{acc | dimensions: acc.dimensions ++ new_dims, id: final_id}
 
@@ -890,8 +956,7 @@ defmodule BackBreeze.Box do
   end
 
   defp do_combine_children(box, [], relative, _opts) do
-    border = box.style.border
-    {start_x, start_y} = container_origin(border)
+    {start_x, start_y} = content_origin(box.style)
 
     if layer_map_entries?(relative.layer_map) do
       merge_layer_map(%{}, relative.layer_map, start_x, start_y)
@@ -902,7 +967,7 @@ defmodule BackBreeze.Box do
 
   defp do_combine_children(box, [absolute], relative, opts) do
     border = box.style.border
-    {rel_x, rel_y} = container_origin(border)
+    {rel_x, rel_y} = content_origin(box.style)
     {overlay_x, overlay_y} = resolve_overlay_origin(absolute, box, relative, border, opts)
 
     {base_map, base_width, base_height} =
@@ -995,14 +1060,6 @@ defmodule BackBreeze.Box do
     }
   end
 
-  defp container_origin(border) do
-    case {border.left, border.top} do
-      {nil, nil} -> {0, 0}
-      {_, nil} -> {1, 0}
-      _ -> {1, 1}
-    end
-  end
-
   defp merge_rendered_box(layer_map, rendered_box, box, relative, border, opts) do
     merge_rendered_box(layer_map, rendered_box, box, relative, border, opts, 0, 0)
   end
@@ -1023,7 +1080,7 @@ defmodule BackBreeze.Box do
           resolve_overlay_origin(rendered_box, box, relative, border, opts)
 
         _ ->
-          container_origin(border)
+          content_origin(box.style)
       end
 
     {map, width, height} =
@@ -1110,6 +1167,7 @@ defmodule BackBreeze.Box do
       style.border
       |> Map.put(:color, style.border_color || style.border.color)
       |> Map.put(:background_color, style.background_color)
+
     border_seq = border_style_sequence(border)
     fill_seq = content_style_sequence(style)
     map = %{}
@@ -1747,10 +1805,15 @@ defmodule BackBreeze.Box do
     )
   end
 
+  defp resolved_parent_width(%{width: rendered_width, style: style}, _opts)
+       when is_integer(rendered_width) do
+    max(rendered_width - border_horizontal(style.border) - padding_horizontal(style), 0)
+  end
+
   defp resolved_parent_width(%{style: %{width: width} = style}, opts) do
     case width do
       w when is_integer(w) ->
-        max(w - padding_horizontal(style), 0)
+        max(w - border_horizontal(style.border) - padding_horizontal(style), 0)
 
       :screen ->
         {screen_width, _screen_height} =
@@ -1763,10 +1826,15 @@ defmodule BackBreeze.Box do
     end
   end
 
+  defp resolved_parent_height(%{height: rendered_height, style: style}, _opts)
+       when is_integer(rendered_height) do
+    max(rendered_height - border_vertical(style.border) - padding_vertical(style), 0)
+  end
+
   defp resolved_parent_height(%{style: %{height: height} = style}, opts) do
     case height do
       h when is_integer(h) ->
-        max(h - padding_vertical(style), 0)
+        max(h - border_vertical(style.border) - padding_vertical(style), 0)
 
       :screen ->
         {_screen_width, screen_height} =
@@ -1803,13 +1871,11 @@ defmodule BackBreeze.Box do
           plain_wrap_leaf_child?(child)
 
       should_fill_width? =
-        (display != :inline && child.style.width == :full) || auto_wrap_leaf_child? ||
+        (display != :inline && child.style.width in [:full, :screen]) || auto_wrap_leaf_child? ||
           (not overlay_position?(child) && auto_fill_container?)
 
       if should_fill_width? do
-        border_adj = border_horizontal(child.style.border)
-
-        %{child | style: %{child.style | width: max(0, parent_width - border_adj)}}
+        %{child | style: %{child.style | width: max(0, parent_width)}}
       else
         child
       end
@@ -1819,9 +1885,8 @@ defmodule BackBreeze.Box do
   defp resolve_fill_width(child, _display, nil, _used_width, _overflow), do: child
 
   defp resolve_fill_width(child, :inline, parent_width, used_width, _overflow) do
-    if child.style.width == :full and not overlay_position?(child) do
-      border_adj = border_horizontal(child.style.border)
-      remaining_width = max(parent_width - used_width - border_adj, 0)
+    if child.style.width in [:full, :screen] and not overlay_position?(child) do
+      remaining_width = max(parent_width - used_width, 0)
       %{child | style: %{child.style | width: remaining_width}}
     else
       child
@@ -1833,23 +1898,19 @@ defmodule BackBreeze.Box do
   defp resolve_fill_height(child, _display, nil, _used_height), do: child
 
   defp resolve_fill_height(child, :inline, parent_height, _used_height) do
-    if child.style.height == :full do
-      border_adj = border_vertical(child.style.border)
-
-      %{child | style: %{child.style | height: max(0, parent_height - border_adj)}}
+    if child.style.height in [:full, :screen] do
+      %{child | style: %{child.style | height: max(0, parent_height)}}
     else
       child
     end
   end
 
   defp resolve_fill_height(child, :block, parent_height, used_height) do
-    if child.style.height != :full do
+    if child.style.height not in [:full, :screen] do
       child
     else
-      border_adj = border_vertical(child.style.border)
-
       used_height = if overlay_position?(child), do: 0, else: used_height
-      %{child | style: %{child.style | height: max(0, parent_height - used_height - border_adj)}}
+      %{child | style: %{child.style | height: max(0, parent_height - used_height)}}
     end
   end
 
@@ -1886,10 +1947,16 @@ defmodule BackBreeze.Box do
 
   defp resolve_overlay_fill_size(child, _parent, _opts), do: child
 
-  defp constrained_overlay_extent(extent, start_edge, end_edge, container_extent, border_extent)
+  defp constrained_overlay_extent(extent, start_edge, end_edge, container_extent, _border_extent)
        when extent in [:screen, :full] and is_integer(start_edge) and is_integer(end_edge) and
               is_integer(container_extent) do
-    max(container_extent - start_edge - end_edge - border_extent, 0)
+    max(container_extent - start_edge - end_edge, 0)
+  end
+
+  defp constrained_overlay_extent(extent, start_edge, end_edge, container_extent, _border_extent)
+       when is_integer(extent) and is_integer(start_edge) and is_integer(end_edge) and
+              is_integer(container_extent) and extent >= container_extent do
+    max(container_extent - start_edge - end_edge, 0)
   end
 
   defp constrained_overlay_extent(
@@ -2054,9 +2121,6 @@ defmodule BackBreeze.Box do
   defp padding_vertical(style),
     do: style_value(style, :padding_top) + style_value(style, :padding_bottom)
 
-  defp padding_origin(style),
-    do: {style_value(style, :padding_left), style_value(style, :padding_top)}
-
   defp content_origin(style) do
     {
       border_left_offset(style.border) + style_value(style, :padding_left),
@@ -2065,7 +2129,10 @@ defmodule BackBreeze.Box do
   end
 
   defp style_value(style, side_key) do
-    Map.get(style, side_key, Map.get(style, :padding, 0))
+    case Map.get(style, side_key) do
+      value when is_integer(value) -> value
+      _ -> Map.get(style, :padding, 0) || 0
+    end
   end
 
   defp plain_content_container?(box, child_content, has_overlay_children?)
@@ -2073,7 +2140,7 @@ defmodule BackBreeze.Box do
     box.scroll == {0, 0} and
       box.children != [] and
       box.style.scrollbar == false and
-      not has_overlay_children?
+      not has_overlay_children? and plain_wrapper_style?(box)
   end
 
   defp plain_content_container?(_box, _child_layer_map, _has_overlay_children?), do: false
@@ -2092,10 +2159,10 @@ defmodule BackBreeze.Box do
            bold: false,
            italic: false,
            padding: 0,
-           padding_top: 0,
-           padding_right: 0,
-           padding_bottom: 0,
-           padding_left: 0,
+           padding_top: nil,
+           padding_right: nil,
+           padding_bottom: nil,
+           padding_left: nil,
            reverse: false,
            border: border,
            overflow: :auto,
@@ -2171,14 +2238,14 @@ defmodule BackBreeze.Box do
       first_size(
         rendered_parent && rendered_parent.width,
         parent.width,
-        parent.style.width
+        resolved_parent_overlay_extent(parent, :width, border, opts)
       )
 
     height =
       first_size(
         rendered_parent && rendered_parent.height,
         parent.height,
-        parent.style.height
+        resolved_parent_overlay_extent(parent, :height, border, opts)
       )
 
     {
@@ -2187,8 +2254,8 @@ defmodule BackBreeze.Box do
     }
   end
 
-  defp resolved_overlay_width(width, border, _opts) when is_integer(width),
-    do: width + border_horizontal(border)
+  defp resolved_overlay_width(width, _border, _opts) when is_integer(width),
+    do: width
 
   defp resolved_overlay_width(:screen, _border, opts) do
     {screen_width, _screen_height} = BackBreeze.screen_dimensions(Keyword.get(opts, :terminal))
@@ -2197,8 +2264,8 @@ defmodule BackBreeze.Box do
 
   defp resolved_overlay_width(_, _border, _opts), do: 0
 
-  defp resolved_overlay_height(height, border, _opts) when is_integer(height),
-    do: height + border_vertical(border)
+  defp resolved_overlay_height(height, _border, _opts) when is_integer(height),
+    do: height
 
   defp resolved_overlay_height(:screen, _border, opts) do
     {_screen_width, screen_height} = BackBreeze.screen_dimensions(Keyword.get(opts, :terminal))
@@ -2206,6 +2273,36 @@ defmodule BackBreeze.Box do
   end
 
   defp resolved_overlay_height(_, _border, _opts), do: 0
+
+  defp resolved_parent_overlay_extent(%{position: :fixed} = parent, :width, _border, opts) do
+    {screen_width, _screen_height} = BackBreeze.screen_dimensions(Keyword.get(opts, :terminal))
+
+    constrained_overlay_extent(
+      parent.style.width,
+      parent.left,
+      parent.right,
+      screen_width,
+      border_horizontal(parent.style.border)
+    ) || resolved_overlay_width(parent.style.width, parent.style.border, opts)
+  end
+
+  defp resolved_parent_overlay_extent(%{position: :fixed} = parent, :height, _border, opts) do
+    {_screen_width, screen_height} = BackBreeze.screen_dimensions(Keyword.get(opts, :terminal))
+
+    constrained_overlay_extent(
+      parent.style.height,
+      parent.top,
+      parent.bottom,
+      screen_height,
+      border_vertical(parent.style.border)
+    ) || resolved_overlay_height(parent.style.height, parent.style.border, opts)
+  end
+
+  defp resolved_parent_overlay_extent(parent, :width, _border, opts),
+    do: Map.get(parent.style, :width) |> resolved_overlay_width(parent.style.border, opts)
+
+  defp resolved_parent_overlay_extent(parent, :height, _border, opts),
+    do: Map.get(parent.style, :height) |> resolved_overlay_height(parent.style.border, opts)
 
   defp resolve_edge_offset(value, _opposite, _child_size, _container_size) when is_integer(value),
     do: value

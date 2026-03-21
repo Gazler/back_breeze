@@ -27,7 +27,11 @@ defmodule BackBreeze.Grid do
         other -> other
       end
 
-    width_offset = if(style.border.left, do: 1, else: 0) + if style.border.right, do: 1, else: 0
+    width_offset =
+      if(style.border.left, do: 1, else: 0) +
+        if(style.border.right, do: 1, else: 0) +
+        style_value(style, :padding_left) +
+        style_value(style, :padding_right)
 
     height =
       case style.height do
@@ -35,7 +39,11 @@ defmodule BackBreeze.Grid do
         other -> other
       end
 
-    height_offset = if(style.border.top, do: 1, else: 0) + if style.border.bottom, do: 1, else: 0
+    height_offset =
+      if(style.border.top, do: 1, else: 0) +
+        if(style.border.bottom, do: 1, else: 0) +
+        style_value(style, :padding_top) +
+        style_value(style, :padding_bottom)
 
     rows = Enum.chunk_every(items, grid.columns)
     row_count = grid.rows || length(rows)
@@ -71,12 +79,20 @@ defmodule BackBreeze.Grid do
   defp render_with_dimensions(items, grid, style, opts, structured?) do
     {screen_width, screen_height} = BackBreeze.screen_dimensions(Keyword.get(opts, :terminal))
 
-    width_offset = if(style.border.left, do: 1, else: 0) + if style.border.right, do: 1, else: 0
+    width_offset =
+      if(style.border.left, do: 1, else: 0) +
+        if(style.border.right, do: 1, else: 0) +
+        style_value(style, :padding_left) +
+        style_value(style, :padding_right)
 
     # Although this is similar to the calculation in precompute, dividing into columns happens
     # only if the width is not explicitly specified, compared to always dividing in the
     # precompute function
-    height_offset = if(style.border.top, do: 1, else: 0) + if style.border.bottom, do: 1, else: 0
+    height_offset =
+      if(style.border.top, do: 1, else: 0) +
+        if(style.border.bottom, do: 1, else: 0) +
+        style_value(style, :padding_top) +
+        style_value(style, :padding_bottom)
 
     rows = Enum.chunk_every(items, grid.columns)
     row_count = grid.rows || length(rows)
@@ -84,12 +100,13 @@ defmodule BackBreeze.Grid do
     total_width =
       case style.width do
         width when width in @auto_sizes -> screen_width - width_offset
+        other when is_integer(other) -> max(other - width_offset, 0)
         other -> other
       end
 
     total_height =
       case style.height do
-        h when is_integer(h) and h > 0 -> h
+        h when is_integer(h) and h > 0 -> max(h - height_offset, 0)
         _ -> screen_height - height_offset
       end
 
@@ -113,14 +130,10 @@ defmodule BackBreeze.Grid do
 
           cols
           |> Enum.with_index()
-          |> Enum.map(fn {%{style: %{border: border}} = item, col_index} ->
+          |> Enum.map(fn {item, col_index} ->
             col_width = Enum.at(column_widths, col_index, 0)
-
-            width =
-              col_width - if(border.left, do: 1, else: 0) - if(border.right, do: 1, else: 0)
-
-            height =
-              row_height - if(border.top, do: 1, else: 0) - if(border.bottom, do: 1, else: 0)
+            width = col_width
+            height = row_height
 
             style = %{item.style | width: max(width, 0), height: max(height, 0)}
 
@@ -263,7 +276,7 @@ defmodule BackBreeze.Grid do
 
   defp resolved_extent(value, total, rendered) do
     cond do
-      is_integer(value) and value > 0 -> total
+      is_integer(value) and value > 0 -> value
       value in @auto_sizes -> total
       true -> rendered || total
     end
@@ -309,10 +322,9 @@ defmodule BackBreeze.Grid do
     case item do
       %{style: style} ->
         style_value = Map.get(style, axis)
-        border_size = border_size(style.border, axis)
 
         case style_value do
-          value when is_integer(value) and value > 0 -> value + border_size
+          value when is_integer(value) and value > 0 -> value
           _ -> nil
         end
 
@@ -320,12 +332,6 @@ defmodule BackBreeze.Grid do
         nil
     end
   end
-
-  defp border_size(border, :width),
-    do: if(border.left, do: 1, else: 0) + if(border.right, do: 1, else: 0)
-
-  defp border_size(border, :height),
-    do: if(border.top, do: 1, else: 0) + if(border.bottom, do: 1, else: 0)
 
   defp distribute_dimension(count, total, explicit, grow_indexes) do
     explicit_total =
@@ -418,5 +424,12 @@ defmodule BackBreeze.Grid do
 
   defp materialized_content(%{layer_map: layer_map, width: width, height: height}) do
     BackBreeze.Box.layer_map_to_content(layer_map, width, height)
+  end
+
+  defp style_value(style, side_key) do
+    case Map.get(style, side_key) do
+      value when is_integer(value) -> value
+      _ -> Map.get(style, :padding, 0) || 0
+    end
   end
 end
