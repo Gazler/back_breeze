@@ -5,12 +5,12 @@ defmodule BackBreeze.StyleTest do
     test "styles can be composed" do
       style =
         BackBreeze.Style.bold()
-        |> BackBreeze.Style.width(15)
+        |> BackBreeze.Style.width(17)
         |> BackBreeze.Style.border()
         |> BackBreeze.Style.foreground_color(3)
 
       assert style.bold
-      assert style.width == 15
+      assert style.width == 17
       assert style.border == BackBreeze.Border.line()
       assert style.foreground_color == 3
     end
@@ -36,7 +36,7 @@ defmodule BackBreeze.StyleTest do
     test "outputting the styles" do
       style =
         BackBreeze.Style.bold()
-        |> BackBreeze.Style.width(15)
+        |> BackBreeze.Style.width(17)
         |> BackBreeze.Style.border()
         |> BackBreeze.Style.foreground_color(3)
 
@@ -46,7 +46,7 @@ defmodule BackBreeze.StyleTest do
 
     test "renders borders with the box background color" do
       style =
-        BackBreeze.Style.width(5)
+        BackBreeze.Style.width(7)
         |> BackBreeze.Style.border()
         |> BackBreeze.Style.border_color(3)
         |> BackBreeze.Style.background_color(0)
@@ -63,7 +63,7 @@ defmodule BackBreeze.StyleTest do
 
     test "renders empty lines when a height is specified" do
       style =
-        BackBreeze.Style.height(3)
+        BackBreeze.Style.height(5)
         |> BackBreeze.Style.border()
 
       output = BackBreeze.Style.render(style, "Hello World")
@@ -149,13 +149,25 @@ defmodule BackBreeze.StyleTest do
 
     test "adds directional horizontal padding" do
       style =
-        BackBreeze.Style.width(3)
+        BackBreeze.Style.width(6)
         |> BackBreeze.Style.padding_left(1)
         |> BackBreeze.Style.padding_right(2)
 
       output = BackBreeze.Style.render(style, "Hey")
 
       assert output == " Hey  "
+    end
+
+    test "treats explicit height as outer height when padding is present" do
+      style =
+        BackBreeze.Style.height(4)
+        |> BackBreeze.Style.width(10)
+        |> BackBreeze.Style.padding_top(1)
+        |> BackBreeze.Style.padding_bottom(1)
+
+      output = BackBreeze.Style.render(style, "X")
+
+      assert output == "          \nX         \n          \n          "
     end
   end
 
@@ -213,7 +225,7 @@ defmodule BackBreeze.StyleTest do
 
       style =
         BackBreeze.Style.border()
-        |> BackBreeze.Style.width(30)
+        |> BackBreeze.Style.width(32)
 
       output = BackBreeze.Style.render(style, content)
 
@@ -233,8 +245,8 @@ defmodule BackBreeze.StyleTest do
 
       style =
         BackBreeze.Style.border()
-        |> BackBreeze.Style.width(30)
-        |> BackBreeze.Style.height(2)
+        |> BackBreeze.Style.width(32)
+        |> BackBreeze.Style.height(4)
         |> BackBreeze.Style.overflow(:hidden)
 
       output = BackBreeze.Style.render(style, content)
@@ -253,8 +265,8 @@ defmodule BackBreeze.StyleTest do
 
       style =
         BackBreeze.Style.border()
-        |> BackBreeze.Style.width(30)
-        |> BackBreeze.Style.height(8)
+        |> BackBreeze.Style.width(32)
+        |> BackBreeze.Style.height(10)
 
       output = BackBreeze.Style.render(style, content)
 
@@ -278,7 +290,7 @@ defmodule BackBreeze.StyleTest do
 
       style =
         BackBreeze.Style.border()
-        |> BackBreeze.Style.width(10)
+        |> BackBreeze.Style.width(12)
         |> BackBreeze.Style.overflow(:hidden)
 
       output = BackBreeze.Style.render(style, content)
@@ -291,8 +303,8 @@ defmodule BackBreeze.StyleTest do
 
       style =
         BackBreeze.Style.border()
-        |> BackBreeze.Style.width(7)
-        |> BackBreeze.Style.height(3)
+        |> BackBreeze.Style.width(9)
+        |> BackBreeze.Style.height(5)
         |> BackBreeze.Style.overflow(:hidden)
 
       output = BackBreeze.Style.render(style, content, offset_top: 1)

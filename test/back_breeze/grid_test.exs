@@ -38,5 +38,22 @@ defmodule BackBreeze.GridTest do
 
     assert {"Foo   Bar   Baz   \n                  ", 18, 2} =
              BackBreeze.Grid.render(items, %Grid{columns: 3}, style, terminal: terminal)
+
+    test "explicit grid size respects the grid's own horizontal padding" do
+      items = [
+        BackBreeze.Box.new(content: "HEADER"),
+        BackBreeze.Box.new(content: "FOOT")
+      ]
+
+      style =
+        %BackBreeze.Style{width: 20, height: 4}
+        |> BackBreeze.Style.padding_left(2)
+        |> BackBreeze.Style.padding_right(2)
+
+      assert {"HEADER          \n                \nFOOT            \n                ", 20, 4} =
+               BackBreeze.Grid.render(items, %Grid{columns: 1}, style,
+                 terminal: %Termite.Terminal{size: %{width: 20, height: 4}}
+               )
+    end
   end
 end
