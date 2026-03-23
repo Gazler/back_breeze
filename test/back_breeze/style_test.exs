@@ -220,6 +220,71 @@ defmodule BackBreeze.StyleTest do
   end
 
   describe "text overflow" do
+    test "repeats content horizontally to the rendered width" do
+      style =
+        %BackBreeze.Style{}
+        |> BackBreeze.Style.border()
+        |> BackBreeze.Style.width(8)
+        |> BackBreeze.Style.repeat_x()
+
+      output = BackBreeze.Style.render(style, "━")
+
+      assert output ==
+               """
+               ┌──────┐
+               │━━━━━━│
+               └──────┘\
+               """
+    end
+
+    test "repeats multi-character content horizontally to the rendered width" do
+      style =
+        %BackBreeze.Style{}
+        |> BackBreeze.Style.width(7)
+        |> BackBreeze.Style.repeat_x()
+
+      output = BackBreeze.Style.render(style, "ab")
+
+      assert output == "abababa"
+    end
+
+    test "repeats content vertically to the rendered height" do
+      style =
+        %BackBreeze.Style{}
+        |> BackBreeze.Style.height(4)
+        |> BackBreeze.Style.repeat_y()
+
+      output = BackBreeze.Style.render(style, "A\nB")
+
+      assert output ==
+               """
+               A
+               B
+               A
+               B\
+               """
+    end
+
+    test "repeats content across both dimensions inside a fixed box" do
+      style =
+        %BackBreeze.Style{}
+        |> BackBreeze.Style.border()
+        |> BackBreeze.Style.width(6)
+        |> BackBreeze.Style.height(5)
+        |> BackBreeze.Style.repeat()
+
+      output = BackBreeze.Style.render(style, "╱")
+
+      assert output ==
+               """
+               ┌────┐
+               │╱╱╱╱│
+               │╱╱╱╱│
+               │╱╱╱╱│
+               └────┘\
+               """
+    end
+
     test "overflows with auto height" do
       content = String.duplicate("hello world ", 10)
 

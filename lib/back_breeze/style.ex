@@ -12,6 +12,8 @@ defmodule BackBreeze.Style do
             padding_bottom: nil,
             padding_left: nil,
             reverse: false,
+            repeat_x: false,
+            repeat_y: false,
             border: BackBreeze.Border.none(),
             text_align: :left,
             width: :auto,
@@ -33,6 +35,21 @@ defmodule BackBreeze.Style do
   def reverse(style \\ %Style{}) do
     %{style | reverse: true}
   end
+
+  def repeat_x(style \\ %Style{}, enabled \\ true) do
+    %{style | repeat_x: enabled}
+  end
+
+  def repeat_y(style \\ %Style{}, enabled \\ true) do
+    %{style | repeat_y: enabled}
+  end
+
+  def repeat(style \\ %Style{}, axis \\ :both)
+
+  def repeat(style, true), do: repeat(style, :both)
+  def repeat(style, :x), do: repeat_x(style)
+  def repeat(style, :y), do: repeat_y(style)
+  def repeat(style, :both), do: style |> repeat_x() |> repeat_y()
 
   def padding(style \\ %Style{}, padding) when is_integer(padding) and padding >= 0 do
     %{
@@ -177,6 +194,8 @@ defmodule BackBreeze.Style do
     {border, style} = Map.pop(style, :border)
     {text_align, style} = Map.pop(style, :text_align, :left)
     {overflow, style} = Map.pop(style, :overflow)
+    {repeat_x, style} = Map.pop(style, :repeat_x, false)
+    {repeat_y, style} = Map.pop(style, :repeat_y, false)
     {padding, style} = Map.pop(style, :padding, 0)
     {padding_top, style} = Map.pop(style, :padding_top, nil)
     {padding_right, style} = Map.pop(style, :padding_right, nil)
@@ -238,6 +257,8 @@ defmodule BackBreeze.Style do
         [""] -> []
         other -> other
       end
+      |> maybe_repeat_x(width, repeat_x)
+      |> maybe_repeat_y(height, repeat_y)
 
     content_height = if List.last(lines) == "", do: length(lines) - 1, else: length(lines)
     original_height = height
@@ -340,5 +361,39 @@ defmodule BackBreeze.Style do
   defp horizontal_padding(:center, padding) do
     left = div(padding, 2)
     {left, padding - left}
+  end
+
+  defp maybe_repeat_x(lines, width, true) when is_integer(width) and width > 0 do
+    Enum.map(lines, &repeat_line_to_width(&1, width))
+  end
+
+  defp maybe_repeat_x(lines, _width, _repeat_x), do: lines
+
+  defp maybe_repeat_y([], _height, _repeat_y), do: []
+
+  defp maybe_repeat_y(lines, height, true) when is_integer(height) and height > 0 do
+    line_count = length(lines)
+
+    for index <- 0..(height - 1) do
+      Enum.at(lines, rem(index, line_count))
+    end
+  end
+
+  defp maybe_repeat_y(lines, _height, _repeat_y), do: lines
+
+  defp repeat_line_to_width("", _width), do: ""
+
+  defp repeat_line_to_width(line, width) do
+    line_width = BackBreeze.Utils.string_length(line)
+
+    repeats =
+      width
+      |> Kernel.+(line_width - 1)
+      |> div(line_width)
+      |> max(1)
+
+    line
+    |> String.duplicate(repeats)
+    |> BackBreeze.String.truncate(width)
   end
 end
