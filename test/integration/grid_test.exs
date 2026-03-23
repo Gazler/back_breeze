@@ -136,6 +136,86 @@ defmodule BackBreeze.Integration.GridTest do
              """
   end
 
+  test "upper row overlays render above later grid rows" do
+    dropdown_like =
+      BackBreeze.Box.new(
+        style: %{width: 8, height: 1},
+        children: [
+          BackBreeze.Box.new(content: "POST  ▼"),
+          BackBreeze.Box.new(content: "GET\nPOST\nPUT", position: :absolute, left: 0, top: 1)
+        ]
+      )
+
+    lower_panel =
+      BackBreeze.Box.new(
+        style: %{border: :line, height: 6},
+        children: [
+          BackBreeze.Box.new(content: "Body"),
+          BackBreeze.Box.new(content: "Title", position: :absolute, left: 2, top: 0)
+        ]
+      )
+
+    box =
+      BackBreeze.Box.new(
+        children: [dropdown_like, lower_panel],
+        style: %{width: 20, height: 8},
+        display: %BackBreeze.Grid{columns: 1, rows: 2}
+      )
+
+    rendered = BackBreeze.Box.render(box)
+    lines = String.split(rendered.content, "\n")
+
+    assert Enum.at(lines, 0) =~ "POST"
+    assert Enum.at(lines, 1) =~ "GET"
+    assert Enum.at(lines, 2) =~ "POST"
+    assert Enum.at(lines, 3) =~ "UT"
+  end
+
+  test "nested grid overlays render above later outer-grid rows" do
+    dropdown_like =
+      BackBreeze.Box.new(
+        style: %{width: 8, height: 1},
+        children: [
+          BackBreeze.Box.new(content: "POST  ▼"),
+          BackBreeze.Box.new(content: "GET\nPOST\nPUT", position: :absolute, left: 0, top: 1)
+        ]
+      )
+
+    top_controls =
+      BackBreeze.Box.new(
+        display: %BackBreeze.Grid{columns: 3},
+        children: [
+          BackBreeze.Box.new(content: "L"),
+          dropdown_like,
+          BackBreeze.Box.new(content: "R")
+        ]
+      )
+
+    lower_panel =
+      BackBreeze.Box.new(
+        style: %{border: :line, height: 6},
+        children: [
+          BackBreeze.Box.new(content: "Body"),
+          BackBreeze.Box.new(content: "Title", position: :absolute, left: 2, top: 0)
+        ]
+      )
+
+    box =
+      BackBreeze.Box.new(
+        children: [top_controls, lower_panel],
+        style: %{width: 20, height: 8},
+        display: %BackBreeze.Grid{columns: 1, rows: 2}
+      )
+
+    rendered = BackBreeze.Box.render(box)
+    lines = String.split(rendered.content, "\n")
+
+    assert Enum.at(lines, 0) =~ "POST"
+    assert Enum.at(lines, 1) =~ "GET"
+    assert Enum.at(lines, 2) =~ "POST"
+    assert Enum.at(lines, 3) =~ "UT"
+  end
+
   test "grid dimensions" do
     %{dimensions: dimensions} =
       BackBreeze.Box.render_with_dimensions(grid_box(),

@@ -13,7 +13,7 @@ defmodule BackBreeze.Grid do
   @doc """
   Create a grid with the specified number of columns.
   """
-  defstruct [:columns, :rows]
+  defstruct [:columns, :rows, :gap_x, :gap_y]
 
   @auto_sizes [:screen, :auto, :full]
 
@@ -47,8 +47,16 @@ defmodule BackBreeze.Grid do
 
     rows = Enum.chunk_every(items, grid.columns)
     row_count = grid.rows || length(rows)
-    column_widths = resolve_track_sizes(rows, grid.columns, width - width_offset, :width)
-    row_heights = resolve_track_sizes(rows, row_count, height - height_offset, :height)
+    gap_x = max(grid.gap_x || 0, 0)
+    gap_y = max(grid.gap_y || 0, 0)
+    total_gap_x = max(grid.columns - 1, 0) * gap_x
+    total_gap_y = max(row_count - 1, 0) * gap_y
+
+    column_widths =
+      resolve_track_sizes(rows, grid.columns, width - width_offset - total_gap_x, :width)
+
+    row_heights =
+      resolve_track_sizes(rows, row_count, height - height_offset - total_gap_y, :height)
 
     %{
       width: Enum.min(column_widths, fn -> 0 end),
@@ -110,16 +118,21 @@ defmodule BackBreeze.Grid do
         _ -> screen_height - height_offset
       end
 
+    gap_x = max(grid.gap_x || 0, 0)
+    gap_y = max(grid.gap_y || 0, 0)
+    total_gap_x = max(grid.columns - 1, 0) * gap_x
+    total_gap_y = max(row_count - 1, 0) * gap_y
+
     {column_widths, row_heights} =
       BenchProfile.measure({__MODULE__, :tracks}, fn ->
         {
-          resolve_track_sizes(rows, grid.columns, total_width, :width),
-          resolve_track_sizes(rows, row_count, total_height, :height)
+          resolve_track_sizes(rows, grid.columns, total_width - total_gap_x, :width),
+          resolve_track_sizes(rows, row_count, total_height - total_gap_y, :height)
         }
       end)
 
-    column_offsets = prefix_offsets(column_widths)
-    row_offsets = prefix_offsets(row_heights)
+    column_offsets = prefix_offsets(column_widths, gap_x)
+    row_offsets = prefix_offsets(row_heights, gap_y)
 
     rows_with_results =
       BenchProfile.measure({__MODULE__, :children}, fn ->
@@ -191,7 +204,7 @@ defmodule BackBreeze.Grid do
         use_structured_simple_compose? = simple_compose_from_layer_maps?(rendered_children)
 
         cond do
-          simple_row_or_column? and grid.columns == 1 ->
+          simple_row_or_column? and grid.columns == 1 and gap_y == 0 ->
             rows_with_results
             |> Enum.map(fn
               [%{result: %{box: item_box}}] ->
@@ -205,7 +218,8 @@ defmodule BackBreeze.Grid do
             |> BackBreeze.Box.join_vertical(height: total_height)
             |> then(fn {content, width, height} -> {content, width, height, %{}} end)
 
-          simple_row_or_column? and row_count == 1 and not use_structured_simple_compose? ->
+          simple_row_or_column? and row_count == 1 and gap_x == 0 and
+              not use_structured_simple_compose? ->
             rows_with_results
             |> List.flatten()
             |> Enum.map(fn %{result: %{box: item_box}} -> materialized_content(item_box) end)
@@ -215,7 +229,9 @@ defmodule BackBreeze.Grid do
           simple_row_or_column? and row_count == 1 ->
             children =
               rendered_children
-              |> Enum.sort_by(fn child -> {child.overlay?, child.top || 0, child.left || 0} end)
+              |> Enum.sort_by(fn child ->
+                {child.layer || 0, -(child.top || 0), -(child.left || 0), child.overlay?}
+              end)
               |> Enum.map(&%{&1 | position: :absolute})
 
             %{width: width, height: height, layer_map: layer_map} =
@@ -239,7 +255,9 @@ defmodule BackBreeze.Grid do
           true ->
             children =
               rendered_children
-              |> Enum.sort_by(fn child -> {child.overlay?, child.top || 0, child.left || 0} end)
+              |> Enum.sort_by(fn child ->
+                {child.layer || 0, -(child.top || 0), -(child.left || 0), child.overlay?}
+              end)
               |> Enum.map(&%{&1 | position: :absolute})
 
             %{width: width, height: height, layer_map: layer_map} =
@@ -397,10 +415,10 @@ defmodule BackBreeze.Grid do
     |> Map.update(:top, top, &(&1 + top))
   end
 
-  defp prefix_offsets(values) do
+  defp prefix_offsets(values, gap) do
     {offsets, _sum} =
       Enum.map_reduce(values, 0, fn value, sum ->
-        {sum, sum + value}
+        {sum, sum + value + gap}
       end)
 
     offsets

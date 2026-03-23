@@ -55,5 +55,15 @@ defmodule BackBreeze.GridTest do
                  terminal: %Termite.Terminal{size: %{width: 20, height: 4}}
                )
     end
+
+    test "column gaps reduce track width and add spacing between cells" do
+      items = ["Foo", "Bar", "Baz"] |> Enum.map(&BackBreeze.Box.new(content: &1))
+      style = %BackBreeze.Style{width: :screen, height: :screen} |> BackBreeze.Style.border()
+
+      assert {"Foo    Bar   Baz  \n                  ", 18, 2} =
+               BackBreeze.Grid.render(items, %Grid{columns: 3, gap_x: 1}, style,
+                 terminal: %Termite.Terminal{size: %{width: 20, height: 4}}
+               )
+    end
   end
 end
