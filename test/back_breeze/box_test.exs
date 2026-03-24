@@ -191,6 +191,32 @@ defmodule BackBreeze.BoxTest do
                """
     end
 
+    test "renders wide inline children without leaking parent fill cells" do
+      marker = BackBreeze.Box.new(content: "🏠", style: %{width: 2}, display: :inline)
+      label = BackBreeze.Box.new(content: "Button", display: :inline)
+
+      box =
+        BackBreeze.Box.new(
+          style: %{border: :line, width: 24},
+          children: [
+            BackBreeze.Box.new(
+              display: :inline,
+              style: %{background_color: 4, foreground_color: 0},
+              children: [marker, label]
+            )
+          ]
+        )
+
+      rendered = BackBreeze.Box.render(box)
+
+      assert rendered.content ==
+               """
+               ┌──────────────────────┐
+               │\e[48;5;4;38;5;0m🏠Button\e[0m              │
+               └──────────────────────┘\
+               """
+    end
+
     test "renders a tree of children joined horizontally" do
       child = BackBreeze.Box.new(content: "Hello", style: %{bold: true, foreground_color: 3})
       nested = BackBreeze.Box.new(children: [child], style: %{border: :line})

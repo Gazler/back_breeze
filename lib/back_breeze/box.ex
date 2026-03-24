@@ -632,7 +632,7 @@ defmodule BackBreeze.Box do
           {%{display: %BackBreeze.Grid{}, children: nested_children} = child_box, child_index},
           child_acc
           when nested_children != [] ->
-            child_box = inherit_parent_background(child_box, box.style)
+            child_box = inherit_parent_colors(child_box, box.style)
             row_index = div(child_index, box.display.columns)
             col_index = rem(child_index, box.display.columns)
             child_left = Enum.at(column_offsets, col_index, 0)
@@ -693,7 +693,7 @@ defmodule BackBreeze.Box do
             {[child | children], [%{dims: [container_dim | shifted_inner_dimensions]} | dims]}
 
           {child_box, child_index}, child_acc ->
-            child_box = inherit_parent_background(child_box, box.style)
+            child_box = inherit_parent_colors(child_box, box.style)
             row_index = div(child_index, box.display.columns)
             col_index = rem(child_index, box.display.columns)
             child_left = Enum.at(column_offsets, col_index, 0)
@@ -788,7 +788,7 @@ defmodule BackBreeze.Box do
     {children, acc, _used_extent} =
       BenchProfile.measure({__MODULE__, :flow_children}, fn ->
         set_layer(children, [], -1)
-        |> Enum.map(&inherit_parent_background(&1, box.style))
+        |> Enum.map(&inherit_parent_colors(&1, box.style))
         |> Enum.map(&resolve_absolute_fill_offsets(&1, box.style.border))
         |> resolve_fill_widths(parent_width, box.display, box.style.overflow)
         |> Enum.reduce({[], acc, 0}, fn child, {boxes, child_acc, used_extent} ->
@@ -1108,6 +1108,7 @@ defmodule BackBreeze.Box do
           shifted_x = x + offset_x
           shifted_y = y + offset_y
           width = Ucwidth.width(char)
+          acc = clear_wide_continuation_cells(acc, shifted_y, shifted_x, width)
 
           {
             Map.put(acc, {shifted_y, shifted_x}, value),
@@ -1620,8 +1621,21 @@ defmodule BackBreeze.Box do
   end
 
   defp merge_visible_layer_maps(layer_map, overlay_layer_map, start_x, start_y, max_x, max_y) do
-    filter_layer_map(layer_map, start_x, start_y, max_x, max_y)
-    |> Map.merge(filter_layer_map(overlay_layer_map, start_x, start_y, max_x, max_y))
+    merge_layer_map(
+      filter_layer_map(layer_map, start_x, start_y, max_x, max_y),
+      filter_layer_map(overlay_layer_map, start_x, start_y, max_x, max_y),
+      0,
+      0
+    )
+    |> elem(0)
+  end
+
+  defp clear_wide_continuation_cells(layer_map, _y, _x, width) when width <= 1, do: layer_map
+
+  defp clear_wide_continuation_cells(layer_map, y, x, width) do
+    Enum.reduce((x + 1)..(x + width - 1), layer_map, fn continuation_x, acc ->
+      Map.delete(acc, {y, continuation_x})
+    end)
   end
 
   defp filter_layer_map(layer_map, start_x, start_y, max_x, max_y) do
@@ -1860,7 +1874,8 @@ defmodule BackBreeze.Box do
       auto_fill_container? =
         display == :block &&
           child.style.width == :auto &&
-          (match?(%BackBreeze.Grid{}, child.display) || child.children != [])
+          (match?(%BackBreeze.Grid{}, child.display) ||
+             (child.display != :inline && child.children != []))
 
       auto_wrap_leaf_child? =
         display == :block &&
@@ -2204,16 +2219,34 @@ defmodule BackBreeze.Box do
     set_layer(rest, [%{box | layer: next_layer} | result], next_layer)
   end
 
-  defp inherit_parent_background(%{style: style} = child, %{background_color: background_color})
-       when not is_nil(background_color) do
+  defp inherit_parent_colors(%{style: style} = child, parent_style) do
+    style =
+      style
+      |> maybe_inherit_background(parent_style.background_color)
+      |> maybe_inherit_foreground(parent_style.foreground_color)
+
+    %{child | style: style}
+  end
+
+  defp maybe_inherit_background(style, nil), do: style
+
+  defp maybe_inherit_background(style, background_color) do
     if is_nil(style.background_color) do
-      %{child | style: BackBreeze.Style.background_color(style, background_color)}
+      BackBreeze.Style.background_color(style, background_color)
     else
-      child
+      style
     end
   end
 
-  defp inherit_parent_background(child, _parent_style), do: child
+  defp maybe_inherit_foreground(style, nil), do: style
+
+  defp maybe_inherit_foreground(style, foreground_color) do
+    if is_nil(style.foreground_color) do
+      BackBreeze.Style.foreground_color(style, foreground_color)
+    else
+      style
+    end
+  end
 
   defp resolve_overlay_origin(child, parent, border, opts) do
     resolve_overlay_origin(child, parent, nil, border, opts)
