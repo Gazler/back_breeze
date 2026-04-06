@@ -321,7 +321,8 @@ defmodule BackBreeze.Box do
 
         width =
           cond do
-            box.style.overflow == :hidden ->
+            (box.style.overflow == :hidden &&
+               is_integer(box.style.width)) and box.style.width > 0 ->
               box.style.width
 
             is_integer(box.style.width) and box.style.width > 0 ->
@@ -338,7 +339,8 @@ defmodule BackBreeze.Box do
 
         height =
           cond do
-            box.style.overflow == :hidden ->
+            (box.style.overflow == :hidden &&
+               is_integer(box.style.height)) and box.style.height > 0 ->
               box.style.height
 
             is_integer(box.style.height) and box.style.height > 0 ->

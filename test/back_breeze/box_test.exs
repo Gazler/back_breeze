@@ -252,6 +252,33 @@ defmodule BackBreeze.BoxTest do
       assert rendered.content == "Left Mid       Right"
     end
 
+    test "inline overflow-hidden containers with auto width keep full child content" do
+      box =
+        BackBreeze.Box.new(
+          display: :inline,
+          style: %{
+            background_color: 0,
+            height: 1,
+            overflow: :hidden,
+            padding_left: 2,
+            padding_right: 1
+          },
+          children: [
+            BackBreeze.Box.new(content: "Esc", style: %{foreground_color: 5, bold: true}),
+            BackBreeze.Box.new(content: " Close"),
+            BackBreeze.Box.new(content: "  "),
+            BackBreeze.Box.new(content: "Enter", style: %{foreground_color: 5, bold: true}),
+            BackBreeze.Box.new(content: " Save")
+          ]
+        )
+
+      rendered = BackBreeze.Box.render(box)
+
+      assert rendered.content ==
+               "\e[48;5;0m  \e[0m\e[1;48;5;0;38;5;5mEsc\e[0m\e[48;5;0m Close  \e[0m" <>
+                 "\e[1;48;5;0;38;5;5mEnter\e[0m\e[48;5;0m Save  \e[0m"
+    end
+
     test "renders a tree with empty absolute nesting" do
       child = BackBreeze.Box.new(content: "Hello", style: %{bold: true, foreground_color: 3})
       nested = BackBreeze.Box.new(children: [child], position: :absolute, top: 0, left: 1)
