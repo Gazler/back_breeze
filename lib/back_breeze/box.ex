@@ -932,7 +932,7 @@ defmodule BackBreeze.Box do
   defp content_height(children, %BackBreeze.Grid{}) do
     children
     |> Enum.reject(&(&1.position == :absolute))
-    |> Enum.map(fn child -> (child.top || 0) + (child.height || 0) end)
+    |> Enum.map(fn child -> normalize_grid_offset(child.top) + (child.height || 0) end)
     |> Enum.max(fn -> 0 end)
   end
 
@@ -942,6 +942,9 @@ defmodule BackBreeze.Box do
       child, acc -> acc + (child.height || 0)
     end)
   end
+
+  defp normalize_grid_offset(offset) when is_integer(offset), do: offset
+  defp normalize_grid_offset(_offset), do: 0
 
   defp combine_children(box, absolutes, relative, acc, opts) do
     BenchProfile.measure({__MODULE__, {:combine_children, length(absolutes)}}, fn ->

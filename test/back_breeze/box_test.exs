@@ -550,6 +550,24 @@ defmodule BackBreeze.BoxTest do
                """
     end
 
+    test "grid content sizing ignores symbolic overlay offsets" do
+      box =
+        BackBreeze.Box.new(
+          display: %BackBreeze.Grid{columns: 1},
+          children: [
+            BackBreeze.Box.new(content: "body"),
+            BackBreeze.Box.new(content: "OK", position: :fixed, left: :center, top: :center)
+          ]
+        )
+
+      rendered =
+        BackBreeze.Box.render(box, terminal: %Termite.Terminal{size: %{width: 10, height: 4}})
+
+      assert rendered.content =~ "body"
+      assert rendered.content =~ "OK"
+      assert rendered.height == 4
+    end
+
     test "supports inset-constrained fixed screen overlays" do
       child =
         BackBreeze.Box.new(
