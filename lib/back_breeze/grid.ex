@@ -9,6 +9,7 @@ defmodule BackBreeze.Grid do
   )
   """
   alias BackBreeze.BenchProfile
+  alias BackBreeze.RenderCache
 
   @doc """
   Create a grid with the specified number of columns.
@@ -85,6 +86,20 @@ defmodule BackBreeze.Grid do
   end
 
   defp render_with_dimensions(items, grid, style, opts, structured?) do
+    terminal = Keyword.get(opts, :terminal)
+
+    RenderCache.with_frame(fn ->
+      RenderCache.fetch_stable(
+        {:grid_render_with_dimensions, structured?, if(terminal, do: terminal.size, else: nil),
+         items, grid, style},
+        fn ->
+          do_render_with_dimensions(items, grid, style, opts, structured?)
+        end
+      )
+    end)
+  end
+
+  defp do_render_with_dimensions(items, grid, style, opts, structured?) do
     {screen_width, screen_height} = BackBreeze.screen_dimensions(Keyword.get(opts, :terminal))
 
     width_offset =

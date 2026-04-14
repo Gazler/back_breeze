@@ -5,6 +5,7 @@ defmodule BackBreeze.RenderCache do
 
   @table :back_breeze_render_cache
   @max_entries 4_096
+  @max_memory_words 8_000_000
   @generation_key {__MODULE__, :generation_counter}
 
   def start_link(opts \\ []) do
@@ -170,8 +171,13 @@ defmodule BackBreeze.RenderCache do
   end
 
   defp maybe_reset_cache do
-    if size() >= @max_entries do
+    if size() >= @max_entries or cache_memory_words() >= @max_memory_words do
       clear()
     end
+  end
+
+  defp cache_memory_words do
+    ensure_started()
+    :ets.info(@table, :memory) || 0
   end
 end
