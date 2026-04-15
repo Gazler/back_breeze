@@ -1138,8 +1138,19 @@ defmodule BackBreeze.Box do
   defp generate_layer_map(content, layer_map, start_x, y) do
     reset = Termite.Style.reset_code()
 
-    {_x, y, {acc, max_x, _, _}} =
-      generate_layer_map_binary(content, layer_map, start_x, start_x, y, 1, false, "", reset)
+    {_x, y, {acc, max_x, _, _, _}} =
+      generate_layer_map_binary(
+        content,
+        layer_map,
+        start_x,
+        start_x,
+        y,
+        1,
+        false,
+        "",
+        reset,
+        reset
+      )
 
     {acc, max_x - 1, y}
   end
@@ -1302,8 +1313,23 @@ defmodule BackBreeze.Box do
   defp maybe_add_color(funs, nil, _fun), do: funs
   defp maybe_add_color(funs, value, fun), do: [fn style -> fun.(style, value) end | funs]
 
-  defp generate_layer_map_binary(<<>>, layer_map, _start_x, x, y, max_x, in_seq?, seq, _reset) do
-    {x, y, {layer_map, max_x, in_seq?, seq}}
+  defp accumulate_sgr_sequence(_active_seq, new_seq, reset) when new_seq == reset, do: reset
+  defp accumulate_sgr_sequence(active_seq, new_seq, reset) when active_seq == reset, do: new_seq
+  defp accumulate_sgr_sequence(active_seq, new_seq, _reset), do: active_seq <> new_seq
+
+  defp generate_layer_map_binary(
+         <<>>,
+         layer_map,
+         _start_x,
+         x,
+         y,
+         max_x,
+         in_seq?,
+         seq,
+         active_seq,
+         _reset
+       ) do
+    {x, y, {layer_map, max_x, in_seq?, seq, active_seq}}
   end
 
   defp generate_layer_map_binary(
@@ -1315,6 +1341,7 @@ defmodule BackBreeze.Box do
          max_x,
          in_seq?,
          seq,
+         active_seq,
          reset
        ) do
     generate_layer_map_binary(
@@ -1326,6 +1353,7 @@ defmodule BackBreeze.Box do
       max_x,
       in_seq?,
       seq,
+      active_seq,
       reset
     )
   end
@@ -1339,9 +1367,21 @@ defmodule BackBreeze.Box do
          max_x,
          false,
          _seq,
+         active_seq,
          reset
        ) do
-    generate_layer_map_binary(rest, layer_map, start_x, x, y, max_x, true, "\e", reset)
+    generate_layer_map_binary(
+      rest,
+      layer_map,
+      start_x,
+      x,
+      y,
+      max_x,
+      true,
+      "\e",
+      active_seq,
+      reset
+    )
   end
 
   defp generate_layer_map_binary(
@@ -1353,9 +1393,11 @@ defmodule BackBreeze.Box do
          max_x,
          true,
          seq,
+         active_seq,
          reset
        ) do
-    generate_layer_map_binary(rest, layer_map, start_x, x, y, max_x, false, seq <> "m", reset)
+    next_seq = accumulate_sgr_sequence(active_seq, seq <> "m", reset)
+    generate_layer_map_binary(rest, layer_map, start_x, x, y, max_x, false, "", next_seq, reset)
   end
 
   defp generate_layer_map_binary(
@@ -1367,10 +1409,22 @@ defmodule BackBreeze.Box do
          max_x,
          true,
          seq,
+         active_seq,
          reset
        )
        when char < 128 do
-    generate_layer_map_binary(rest, layer_map, start_x, x, y, max_x, true, seq <> <<char>>, reset)
+    generate_layer_map_binary(
+      rest,
+      layer_map,
+      start_x,
+      x,
+      y,
+      max_x,
+      true,
+      seq <> <<char>>,
+      active_seq,
+      reset
+    )
   end
 
   defp generate_layer_map_binary(
@@ -1382,15 +1436,27 @@ defmodule BackBreeze.Box do
          max_x,
          false,
          seq,
+         active_seq,
          reset
        )
        when char < 128 do
-    current_seq = if seq == reset, do: "", else: seq
+    current_seq = if active_seq == reset, do: "", else: active_seq
 
-    {x, y, {layer_map, max_x, false, seq}} =
-      add_layer_codepoint(char, layer_map, x, y, max_x, current_seq, seq)
+    {x, y, {layer_map, max_x, false, seq, active_seq}} =
+      add_layer_codepoint(char, layer_map, x, y, max_x, current_seq, seq, active_seq)
 
-    generate_layer_map_binary(rest, layer_map, start_x, x, y, max_x, false, seq, reset)
+    generate_layer_map_binary(
+      rest,
+      layer_map,
+      start_x,
+      x,
+      y,
+      max_x,
+      false,
+      seq,
+      active_seq,
+      reset
+    )
   end
 
   defp generate_layer_map_binary(
@@ -1402,6 +1468,7 @@ defmodule BackBreeze.Box do
          max_x,
          true,
          seq,
+         active_seq,
          reset
        ) do
     generate_layer_map_binary(
@@ -1413,6 +1480,7 @@ defmodule BackBreeze.Box do
       max_x,
       true,
       seq <> <<codepoint::utf8>>,
+      active_seq,
       reset
     )
   end
@@ -1426,14 +1494,26 @@ defmodule BackBreeze.Box do
          max_x,
          false,
          seq,
+         active_seq,
          reset
        ) do
-    current_seq = if seq == reset, do: "", else: seq
+    current_seq = if active_seq == reset, do: "", else: active_seq
 
-    {x, y, {layer_map, max_x, false, seq}} =
-      add_layer_codepoint(codepoint, layer_map, x, y, max_x, current_seq, seq)
+    {x, y, {layer_map, max_x, false, seq, active_seq}} =
+      add_layer_codepoint(codepoint, layer_map, x, y, max_x, current_seq, seq, active_seq)
 
-    generate_layer_map_binary(rest, layer_map, start_x, x, y, max_x, false, seq, reset)
+    generate_layer_map_binary(
+      rest,
+      layer_map,
+      start_x,
+      x,
+      y,
+      max_x,
+      false,
+      seq,
+      active_seq,
+      reset
+    )
   end
 
   defp layer_maps_to_content(layer_map, overlay_layer_map, %{
@@ -1754,7 +1834,7 @@ defmodule BackBreeze.Box do
     end
   end
 
-  defp add_layer_codepoint(codepoint, map, x, y, max_x, current_seq, seq)
+  defp add_layer_codepoint(codepoint, map, x, y, max_x, current_seq, seq, active_seq)
        when is_integer(codepoint) do
     width = Ucwidth.width_codepoint(codepoint)
     char = <<codepoint::utf8>>
@@ -1764,7 +1844,7 @@ defmodule BackBreeze.Box do
       |> Map.put({y, x}, {char, current_seq})
       |> maybe_mark_wide_glyph(width)
 
-    {x + width, y, {map, max(max_x, x + width), false, seq}}
+    {x + width, y, {map, max(max_x, x + width), false, seq, active_seq}}
   end
 
   defp maybe_mark_wide_glyph(map, width) when width > 1, do: Map.put(map, @wide_glyph_key, true)

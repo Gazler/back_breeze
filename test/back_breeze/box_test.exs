@@ -217,6 +217,18 @@ defmodule BackBreeze.BoxTest do
                """
     end
 
+    test "accumulates consecutive sgr sequences before a glyph" do
+      box =
+        BackBreeze.Box.new(
+          content: "\e[38;5;1m\e[48;5;0mX",
+          style: %{border: :line}
+        )
+
+      rendered = BackBreeze.Box.render(box)
+
+      assert rendered.content =~ "│\e[38;5;1m\e[48;5;0mX"
+    end
+
     test "renders a tree of children joined horizontally" do
       child = BackBreeze.Box.new(content: "Hello", style: %{bold: true, foreground_color: 3})
       nested = BackBreeze.Box.new(children: [child], style: %{border: :line})
