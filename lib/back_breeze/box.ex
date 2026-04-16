@@ -99,6 +99,7 @@ defmodule BackBreeze.Box do
           %{box: box, dimensions: dimensions}
         end
       )
+      |> maybe_flatten_rendered_box(opts)
     end)
   end
 
@@ -137,6 +138,7 @@ defmodule BackBreeze.Box do
         end
       end
     )
+    |> maybe_flatten_rendered_box(opts)
   end
 
   @doc false
@@ -1100,13 +1102,14 @@ defmodule BackBreeze.Box do
 
   defp merge_layer_map(target_map, source_map, offset_x, offset_y) do
     wide_glyphs? = has_wide_glyphs?(target_map) or has_wide_glyphs?(source_map)
+    preserve_plain_spaces? = has_wide_glyphs?(source_map)
 
     {map, max_x, max_y} =
       Enum.reduce(source_map, {target_map, 0, 0}, fn
         {@wide_glyph_key, true}, acc ->
           acc
 
-        {{_y, _x}, {" ", ""}}, acc ->
+        {{_y, _x}, {" ", ""}}, acc when not preserve_plain_spaces? ->
           acc
 
         {{y, x}, {char, _} = value}, {acc, cur_max_x, cur_max_y} ->
@@ -2183,6 +2186,14 @@ defmodule BackBreeze.Box do
 
   defp ensure_rendered_content(%{layer_map: layer_map, width: width, height: height} = box) do
     %{box | content: layer_map_to_content(layer_map, width, height)}
+  end
+
+  defp maybe_flatten_rendered_box(%{box: box} = result, opts) do
+    if is_binary(box.content) and not Keyword.get(opts, :structured, false) do
+      %{result | box: %{box | layer_map: %{}}}
+    else
+      result
+    end
   end
 
   defp cached_layer_maps_to_content(layer_map, overlay_layer_map, bounds) do

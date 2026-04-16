@@ -37,7 +37,7 @@ defmodule BackBreeze.MixProject do
 
   defp deps do
     [
-      {:termite, "~> 0.4"},
+      {:termite, "~> 0.4.2 or ~> 0.5"},
       {:ex_doc, "~> 0.34", only: :dev, runtime: false}
     ]
   end

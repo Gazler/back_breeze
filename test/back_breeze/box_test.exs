@@ -217,6 +217,37 @@ defmodule BackBreeze.BoxTest do
                """
     end
 
+    test "recomposing a rendered wide row keeps repeated wide characters contiguous" do
+      row =
+        BackBreeze.Box.new(
+          display: :inline,
+          children: [
+            BackBreeze.Box.new(content: "posts", display: :inline),
+            BackBreeze.Box.new(content: String.duplicate("好", 6), display: :inline)
+          ]
+        )
+
+      rendered_row = BackBreeze.Box.render(row)
+
+      assert rendered_row.content == "posts好好好好好好"
+      assert rendered_row.layer_map == %{}
+
+      box =
+        BackBreeze.Box.new(
+          style: %{border: :line, padding_left: 2, width: 24},
+          children: [rendered_row]
+        )
+
+      rendered = BackBreeze.Box.render(box)
+
+      assert rendered.content ==
+               """
+               ┌──────────────────────┐
+               │  posts好好好好好好   │
+               └──────────────────────┘\
+               """
+    end
+
     test "accumulates consecutive sgr sequences before a glyph" do
       box =
         BackBreeze.Box.new(
