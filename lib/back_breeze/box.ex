@@ -158,6 +158,9 @@ defmodule BackBreeze.Box do
   end
 
   @doc false
+  def positioned_overlay?(%{position: position}), do: position in [:absolute, :fixed]
+
+  @doc false
   def compose_absolute_children_layer_map(children, opts \\ []) do
     rendered_boxes =
       if Keyword.get(opts, :sorted, false) do
@@ -995,7 +998,7 @@ defmodule BackBreeze.Box do
           child_result =
             BenchProfile.measure({__MODULE__, :flow_child_render}, fn ->
               render_cached_with_dimensions(child,
-                structured: Keyword.get(opts, :structured, false),
+                structured: true,
                 terminal: Keyword.get(opts, :terminal)
               )
             end)
@@ -1398,8 +1401,9 @@ defmodule BackBreeze.Box do
 
   defp merge_default_fills(map, target_map, source_map, offset_x, offset_y) do
     fills =
-      shifted_default_fill_entries(source_map, offset_x, offset_y) ++
-        default_fill_entries(target_map)
+      (shifted_default_fill_entries(source_map, offset_x, offset_y) ++
+         default_fill_entries(target_map))
+      |> normalize_default_fill_entries()
 
     if fills == [] do
       Map.delete(map, @default_fill_key)
@@ -1413,6 +1417,10 @@ defmodule BackBreeze.Box do
       {_point, left, top, right, bottom} ->
         x >= left and x <= right and y >= top and y <= bottom
     end)
+  end
+
+  defp generate_layer_map(nil, layer_map, _start_x, _y) do
+    {layer_map, max(layer_map_max_x(layer_map), 0), max(layer_map_max_y(layer_map), 0)}
   end
 
   defp generate_layer_map(content, layer_map, start_x, y) do
@@ -1432,7 +1440,7 @@ defmodule BackBreeze.Box do
         reset
       )
 
-    {acc, max_x - 1, y}
+    compact_full_surface_fill(acc, max_x - 1, y)
   end
 
   defp cached_blank_container_layer_map(box, width, height) do
@@ -2170,6 +2178,7 @@ defmodule BackBreeze.Box do
             []
           end
       end)
+      |> normalize_default_fill_entries()
 
     if fills == [] do
       Map.delete(map, @default_fill_key)
@@ -2179,7 +2188,9 @@ defmodule BackBreeze.Box do
   end
 
   defp maybe_shift_default_fill(map, source_map, shift_x, shift_y) do
-    fills = shifted_default_fill_entries(source_map, shift_x, shift_y)
+    fills =
+      shifted_default_fill_entries(source_map, shift_x, shift_y)
+      |> normalize_default_fill_entries()
 
     if fills == [] do
       Map.delete(map, @default_fill_key)
@@ -2208,9 +2219,80 @@ defmodule BackBreeze.Box do
     end)
   end
 
+  defp normalize_default_fill_entries(fills) do
+    {fills, _seen} =
+      Enum.reduce(fills, {[], MapSet.new()}, fn fill, {acc, seen} ->
+        if MapSet.member?(seen, fill) do
+          {acc, seen}
+        else
+          {[fill | acc], MapSet.put(seen, fill)}
+        end
+      end)
+
+    Enum.reverse(fills)
+  end
+
   defp layer_map_metadata_count(layer_map) do
     if(has_wide_glyphs?(layer_map), do: 1, else: 0) +
       if Map.has_key?(layer_map, @default_fill_key), do: 1, else: 0
+  end
+
+  defp compact_full_surface_fill(layer_map, max_x, max_y)
+       when max_x >= 0 and max_y >= 0 and map_size(layer_map) > 0 do
+    area = (max_x + 1) * (max_y + 1)
+    explicit_count = map_size(layer_map) - layer_map_metadata_count(layer_map)
+
+    cond do
+      # Small dense surfaces are cheaper to leave as-is.
+      area < 512 ->
+        {layer_map, max_x, max_y}
+
+      Map.has_key?(layer_map, @default_fill_key) ->
+        {layer_map, max_x, max_y}
+
+      explicit_count != area ->
+        {layer_map, max_x, max_y}
+
+      true ->
+        case dominant_fill_point(layer_map, area) do
+          nil ->
+            {layer_map, max_x, max_y}
+
+          point ->
+            compacted =
+              layer_map
+              |> Enum.reduce(%{}, fn
+                {{_y, _x}, ^point}, acc ->
+                  acc
+
+                {key, value}, acc ->
+                  Map.put(acc, key, value)
+              end)
+              |> Map.put(@default_fill_key, [{point, 0, 0, max_x, max_y}])
+
+            {compacted, max_x, max_y}
+        end
+    end
+  end
+
+  defp compact_full_surface_fill(layer_map, max_x, max_y), do: {layer_map, max_x, max_y}
+
+  defp dominant_fill_point(layer_map, area) do
+    threshold = div(area * 4, 5)
+
+    layer_map
+    |> Enum.reduce(%{}, fn
+      {{_y, _x}, point}, acc ->
+        Map.update(acc, point, 1, &(&1 + 1))
+
+      _, acc ->
+        acc
+    end)
+    |> Enum.max_by(fn {_point, count} -> count end, fn -> nil end)
+    |> case do
+      {point, count} when count >= threshold -> point
+      _ -> nil
+    end
   end
 
   defp raw_content_width(content) when is_binary(content), do: content_metrics(content) |> elem(0)
@@ -2521,6 +2603,35 @@ defmodule BackBreeze.Box do
     case Enum.reject([explicit_max_y, fill_max_y], &is_nil/1) do
       [] -> nil
       values -> Enum.max(values) + 1
+    end
+  end
+
+  defp layer_map_max_x(layer_map) when map_size(layer_map) == 0, do: -1
+
+  defp layer_map_max_x(layer_map) do
+    explicit_max_x =
+      Enum.reduce(layer_map, nil, fn
+        {{_y, x}, _value}, nil -> x
+        {{_y, x}, _value}, acc -> max(acc, x)
+        _, acc -> acc
+      end)
+
+    fill_max_x =
+      case default_fill_entries(layer_map) do
+        [] -> nil
+        fills -> fills |> Enum.map(&elem(&1, 3)) |> Enum.max()
+      end
+
+    case Enum.reject([explicit_max_x, fill_max_x], &is_nil/1) do
+      [] -> -1
+      values -> Enum.max(values)
+    end
+  end
+
+  defp layer_map_max_y(layer_map) do
+    case layer_map_height(layer_map) do
+      nil -> -1
+      height -> height - 1
     end
   end
 

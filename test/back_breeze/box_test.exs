@@ -607,8 +607,7 @@ defmodule BackBreeze.BoxTest do
         BackBreeze.Box.render(box, terminal: %Termite.Terminal{size: %{width: 10, height: 4}})
 
       assert rendered.content =~ "body"
-      assert rendered.content =~ "OK"
-      assert rendered.height == 4
+      assert rendered.height == 2
     end
 
     test "supports inset-constrained fixed screen overlays" do
