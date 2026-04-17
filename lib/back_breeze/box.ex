@@ -7,6 +7,7 @@ defmodule BackBreeze.Box do
   alias BackBreeze.BenchProfile
   alias BackBreeze.RenderCache
   alias BackBreeze.Ucwidth
+  alias BackBreeze.VirtualText
 
   @wide_glyph_key :__wide_glyphs__
 
@@ -89,7 +90,7 @@ defmodule BackBreeze.Box do
 
     RenderCache.with_frame(fn ->
       RenderCache.fetch_stable(
-        {:render_with_dimensions, if(terminal, do: terminal.size, else: nil), box},
+        {:render_with_dimensions, if(terminal, do: terminal.size, else: nil), box_cache_key(box)},
         fn ->
           %{box: box, dimensions: dimensions} =
             render_and_calc(%{box: box, dimensions: [], id: 0}, opts)
@@ -109,7 +110,8 @@ defmodule BackBreeze.Box do
 
     RenderCache.with_frame(fn ->
       RenderCache.fetch_stable(
-        {:render_structured_with_dimensions, if(terminal, do: terminal.size, else: nil), box},
+        {:render_structured_with_dimensions,
+         if(terminal, do: terminal.size, else: nil), box_cache_key(box)},
         fn ->
           %{box: box, dimensions: dimensions} =
             render_and_calc(
@@ -129,7 +131,7 @@ defmodule BackBreeze.Box do
     terminal = Keyword.get(opts, :terminal)
 
     RenderCache.fetch_stable(
-      {:render_box, structured?, if(terminal, do: terminal.size, else: nil), box},
+      {:render_box, structured?, if(terminal, do: terminal.size, else: nil), box_cache_key(box)},
       fn ->
         if structured? do
           render_structured_with_dimensions(box, Keyword.delete(opts, :structured))
@@ -290,6 +292,8 @@ defmodule BackBreeze.Box do
 
     structured? = Keyword.get(opts, :structured, false)
     children_content_height = content_height(children, box.display)
+    overlay_only_children? = children != [] and Enum.all?(children, &(&1.position == :absolute or &1.overlay?))
+    preserve_base_scroll? = renderable_content?(box.content) and overlay_only_children?
 
     cond do
       not structured? and
@@ -362,15 +366,26 @@ defmodule BackBreeze.Box do
         # We don't want offset to apply twice in cases when there are children.
         {content, dimensions, _width} =
           BenchProfile.measure({__MODULE__, :render_self}, fn ->
-            render_self(%{box | width: width, height: height, style: style, scroll: {0, 0}}, opts)
+            render_self(
+              %{
+                box
+                | width: width,
+                  height: height,
+                  style: style,
+                  scroll: if(preserve_base_scroll?, do: box.scroll, else: {0, 0})
+              },
+              opts
+            )
           end)
+
+        base_content_height = Map.get(dimensions, :content_height, 0)
 
         border_rows =
           if(box.style.border.top, do: 1, else: 0) +
             if box.style.border.bottom, do: 1, else: 0
 
         dimensions = %{
-          content_height: children_content_height,
+          content_height: max(base_content_height, children_content_height),
           viewport_height: dimensions.height - border_rows,
           viewport_width: width,
           height: dimensions.height,
@@ -584,7 +599,7 @@ defmodule BackBreeze.Box do
     box = normalize_render_self_box(box)
 
     cache_key =
-      {:render_self, box.style, box.content, offset_top,
+      {:render_self, box.style, content_cache_key(box.content), offset_top,
        if(terminal, do: terminal.size, else: nil)}
 
     RenderCache.fetch_stable(cache_key, fn ->
@@ -612,6 +627,11 @@ defmodule BackBreeze.Box do
       _ -> style
     end
   end
+
+  defp renderable_content?(content) when is_binary(content), do: content != ""
+  defp renderable_content?(content) when is_list(content), do: content != []
+  defp renderable_content?(%VirtualText{}), do: true
+  defp renderable_content?(_content), do: false
 
   defp render_children(
          %{box: %{children: children, display: %BackBreeze.Grid{}} = box} = acc,
@@ -1062,10 +1082,35 @@ defmodule BackBreeze.Box do
       box.width,
       box.height,
       box.layer,
-      box.content,
+      content_cache_key(box.content),
       box.layer_map
     }
   end
+
+  defp box_cache_key(%BackBreeze.Box{} = box) do
+    {
+      box.style,
+      box.width,
+      box.height,
+      box.state,
+      box.position,
+      box.left,
+      box.top,
+      box.right,
+      box.bottom,
+      box.display,
+      box.scroll,
+      box.layer,
+      content_cache_key(box.content),
+      Enum.map(box.children, &box_cache_key/1)
+    }
+  end
+
+  defp content_cache_key(%VirtualText{cache_key: cache_key}) when not is_nil(cache_key),
+    do: {:virtual_text, cache_key}
+
+  defp content_cache_key(%VirtualText{content: content}), do: {:virtual_text_binary, content}
+  defp content_cache_key(content), do: content
 
   defp merge_rendered_box(layer_map, rendered_box, box, relative, border, opts) do
     merge_rendered_box(layer_map, rendered_box, box, relative, border, opts, 0, 0)

@@ -117,6 +117,16 @@ defmodule BackBreeze.StyleTest do
                """
     end
 
+    test "does not emit empty style spans for zero-width horizontal padding" do
+      style =
+        BackBreeze.Style.width(5)
+        |> BackBreeze.Style.background_color(0)
+
+      output = BackBreeze.Style.render(style, "Hello")
+
+      assert output == "\e[48;5;0mHello\e[0m"
+    end
+
     test "aligns content in the center" do
       style =
         BackBreeze.Style.width(7)
@@ -381,6 +391,30 @@ defmodule BackBreeze.StyleTest do
                │Line 3 │
                │Line 4 │
                └───────┘\
+               """
+    end
+
+    test "scrolls large fixed-height content near the end of the viewport" do
+      content =
+        Enum.map_join(1..2_000, "\n", fn index ->
+          "Line #{index}" |> String.pad_trailing(12, ".")
+        end)
+
+      style =
+        BackBreeze.Style.border()
+        |> BackBreeze.Style.width(14)
+        |> BackBreeze.Style.height(5)
+        |> BackBreeze.Style.overflow(:hidden)
+
+      output = BackBreeze.Style.render(style, content, offset_top: 1_996)
+
+      assert output ==
+               """
+               ┌────────────┐
+               │Line 1997...│
+               │Line 1998...│
+               │Line 1999...│
+               └────────────┘\
                """
     end
   end

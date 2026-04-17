@@ -3,6 +3,8 @@ defmodule BackBreeze.Style do
   Helper module for styling boxes.
   """
   alias __MODULE__
+  alias BackBreeze.TextLayout
+  alias BackBreeze.VirtualText
 
   defstruct bold: false,
             italic: false,
@@ -180,16 +182,9 @@ defmodule BackBreeze.Style do
   end
 
   def calculate_and_render(style, str, opts \\ []) do
+    source = source_content(str)
     {screen_width, screen_height} = BackBreeze.screen_dimensions(Keyword.get(opts, :terminal))
     style = Map.from_struct(style)
-
-    string_length = BackBreeze.Utils.string_length(str)
-    source_lines = String.split(str, "\n")
-
-    intrinsic_width =
-      Enum.reduce(source_lines, 0, fn line, acc ->
-        max(acc, BackBreeze.Utils.string_length(line))
-      end)
 
     {border, style} = Map.pop(style, :border)
     {text_align, style} = Map.pop(style, :text_align, :left)
@@ -209,6 +204,9 @@ defmodule BackBreeze.Style do
     {height, style} = Map.pop(style, :height, :auto)
 
     auto_width = width == :auto
+    auto_height = height == :auto
+    {string_length, intrinsic_width} = cached_source_metrics(source)
+
     border_width = if(border.left, do: 1, else: 0) + if(border.right, do: 1, else: 0)
     border_height = if(border.top, do: 1, else: 0) + if(border.bottom, do: 1, else: 0)
 
@@ -224,8 +222,6 @@ defmodule BackBreeze.Style do
         do: max(width - border_width - padding_left - padding_right, 0),
         else: width
 
-    auto_height = height == :auto
-
     height =
       cond do
         height == :auto -> 0
@@ -238,12 +234,7 @@ defmodule BackBreeze.Style do
         do: max(height - border_height - padding_top - padding_bottom, 0),
         else: height
 
-    str =
-      cond do
-        string_length <= width -> str
-        overflow == :hidden && height == 0 -> BackBreeze.String.truncate(str, width)
-        true -> BackBreeze.String.reflow(str, width)
-      end
+    windowed_hidden? = windowed_hidden_render?(overflow, height, repeat_x, repeat_y, auto_width)
 
     termite_style = to_termite(style)
 
@@ -252,40 +243,44 @@ defmodule BackBreeze.Style do
       |> Map.put(:color, style.border_color)
       |> Map.put(:background_color, style.background_color)
 
-    lines =
-      case String.split(str, "\n") do
-        [""] -> []
-        other -> other
-      end
-      |> maybe_repeat_x(width, repeat_x)
-      |> maybe_repeat_y(height, repeat_y)
+    {lines, content_height} =
+      if windowed_hidden? do
+        prepared = prepared_content_entry(str, width, height, overflow)
 
-    content_height = if List.last(lines) == "", do: length(lines) - 1, else: length(lines)
+        {slice_visible_lines(prepared, Keyword.get(opts, :offset_top, 0), height),
+         prepared.line_count}
+      else
+        cached_render_lines(source, width, height, overflow, repeat_x, repeat_y, string_length)
+      end
+
     original_height = height
 
     width =
       if auto_width,
-        do:
-          Enum.reduce(lines, 0, fn line, acc -> max(acc, BackBreeze.Utils.string_length(line)) end),
+        do: Enum.reduce(lines, 0, fn line, acc -> max(acc, TextLayout.line_width(line)) end),
         else: width
 
-    start_pos = Keyword.get(opts, :offset_top, 0)
-    end_pos = if overflow == :hidden, do: height + start_pos - 1, else: -1
-
-    lines = Enum.slice(lines, start_pos..end_pos//1)
+    lines =
+      if windowed_hidden? do
+        lines
+      else
+        start_pos = Keyword.get(opts, :offset_top, 0)
+        end_pos = if overflow == :hidden, do: height + start_pos - 1, else: -1
+        Enum.slice(lines, start_pos..end_pos//1)
+      end
 
     rendered_rows =
       Enum.map(lines, fn line ->
-        string_length = BackBreeze.Utils.string_length(line)
+        string_length = TextLayout.line_width(line)
         string_padding = if width > string_length, do: width - string_length, else: 0
         {left_padding, right_padding} = horizontal_padding(text_align, string_padding)
 
         BackBreeze.Border.render_left(border) <>
-          Termite.Style.render_to_string(
+          render_styled_row(
             termite_style,
-            String.duplicate(" ", padding_left + left_padding) <>
-              line <>
-              String.duplicate(" ", right_padding + padding_right)
+            line,
+            padding_left + left_padding,
+            right_padding + padding_right
           ) <>
           BackBreeze.Border.render_right(border)
       end)
@@ -329,6 +324,182 @@ defmodule BackBreeze.Style do
     {content, %{height: height, viewport_height: viewport_height, content_height: content_height}}
   end
 
+  defp cached_source_metrics(str) when is_binary(str) do
+    BackBreeze.RenderCache.fetch_stable({__MODULE__, :source_metrics, str}, fn ->
+      TextLayout.source_metrics(str)
+    end)
+  end
+
+  defp cached_source_metrics(content) when is_list(content) do
+    BackBreeze.RenderCache.fetch_stable({__MODULE__, :source_metrics, content}, fn ->
+      TextLayout.source_metrics(content)
+    end)
+  end
+
+  defp cached_source_metrics(%VirtualText{} = content) do
+    BackBreeze.RenderCache.fetch_stable({__MODULE__, :source_metrics, content.cache_key}, fn ->
+      TextLayout.source_metrics(content)
+    end)
+  end
+
+  defp cached_render_lines(str, width, height, overflow, repeat_x, repeat_y, string_length)
+       when is_binary(str) do
+    BackBreeze.RenderCache.fetch_stable(
+      {__MODULE__, :render_lines, str, width, height, overflow, repeat_x, repeat_y},
+      fn ->
+        str =
+          cond do
+            string_length <= width -> str
+            overflow == :hidden && height == 0 -> BackBreeze.String.truncate(str, width)
+            true -> BackBreeze.String.reflow(str, width)
+          end
+
+        lines =
+          case String.split(str, "\n") do
+            [""] -> []
+            other -> other
+          end
+          |> maybe_repeat_x(width, repeat_x)
+          |> maybe_repeat_y(height, repeat_y)
+
+        content_height = if List.last(lines) == "", do: length(lines) - 1, else: length(lines)
+        {lines, content_height}
+      end
+    )
+  end
+
+  defp cached_render_lines(content, width, height, overflow, repeat_x, repeat_y, _string_length)
+       when is_list(content) do
+    BackBreeze.RenderCache.fetch_stable(
+      {__MODULE__, :render_lines, content, width, height, overflow, repeat_x, repeat_y},
+      fn ->
+        prepared = TextLayout.prepare(content, width, overflow, height)
+        lines = TextLayout.visible_lines(prepared, 0, prepared.raw_line_count)
+        {lines, prepared.line_count}
+      end
+    )
+  end
+
+  defp cached_render_lines(
+         %VirtualText{} = content,
+         width,
+         height,
+         overflow,
+         repeat_x,
+         repeat_y,
+         _string_length
+       ) do
+    BackBreeze.RenderCache.fetch_stable(
+      {__MODULE__, :render_lines, content.cache_key, width, height, overflow, repeat_x, repeat_y},
+      fn ->
+        prepared = TextLayout.prepare(content, width, overflow, height)
+        lines = TextLayout.visible_lines(prepared, 0, prepared.raw_line_count)
+        {lines, prepared.line_count}
+      end
+    )
+  end
+
+  defp prepared_content_entry(%VirtualText{content: source}, width, height, overflow)
+       when is_binary(source) do
+    BackBreeze.PreparedContentStore.fetch(
+      {__MODULE__, :virtual_prepared_content, source, width, height, overflow},
+      fn -> build_prepared_content(%VirtualText{content: source}, width, height, overflow) end
+    )
+  end
+
+  defp prepared_content_entry(%VirtualText{} = content, width, height, overflow) do
+    BackBreeze.PreparedContentStore.fetch(
+      {__MODULE__, :virtual_prepared_content, content.cache_key, width, height, overflow},
+      fn -> build_prepared_content(content, width, height, overflow) end
+    )
+  end
+
+  defp prepared_content_entry(str, width, height, overflow) when is_binary(str) do
+    BackBreeze.PreparedContentStore.fetch(
+      {__MODULE__, :prepared_content, str, width, height, overflow},
+      fn -> build_prepared_content(str, width, height, overflow) end
+    )
+  end
+
+  defp prepared_content_entry(content, width, height, overflow) when is_list(content) do
+    BackBreeze.PreparedContentStore.fetch(
+      {__MODULE__, :prepared_content, content, width, height, overflow},
+      fn -> build_prepared_content(content, width, height, overflow) end
+    )
+  end
+
+  defp windowed_hidden_render?(:hidden, height, false, false, false)
+       when is_integer(height) and height > 0,
+       do: true
+
+  defp windowed_hidden_render?(_overflow, _height, _repeat_x, _repeat_y, _auto_width), do: false
+
+  defp slice_visible_lines(
+         %{content: content, line_offsets: offsets, line_count: total_lines},
+         start_line,
+         line_count
+       )
+       when is_binary(content) and is_integer(start_line) and is_integer(line_count) and
+              line_count > 0 do
+    start_line = max(start_line, 0)
+    last_line = min(start_line + line_count - 1, total_lines - 1)
+
+    if start_line > last_line do
+      []
+    else
+      Enum.map(start_line..last_line, fn line_no ->
+        extract_line(content, offsets, line_no)
+      end)
+    end
+  end
+
+  defp slice_visible_lines(%{lines: _lines} = prepared, start_line, line_count) do
+    TextLayout.visible_lines(prepared, start_line, line_count)
+  end
+
+  defp slice_visible_lines(%{kind: :virtual} = prepared, start_line, line_count) do
+    TextLayout.visible_lines(prepared, start_line, line_count)
+  end
+
+  defp slice_visible_lines(_prepared, _start_line, _line_count), do: []
+
+  defp build_prepared_content(str, width, height, overflow) when is_binary(str) do
+    prepared = TextLayout.prepare(str, width, overflow, height)
+
+    %{
+      content: prepared.content,
+      line_offsets: prepared.line_offsets,
+      line_count: prepared.line_count,
+      raw_line_count: prepared.raw_line_count,
+      string_length: prepared.string_length,
+      intrinsic_width: prepared.intrinsic_width
+    }
+  end
+
+  defp build_prepared_content(content, width, height, overflow) when is_list(content),
+    do: TextLayout.prepare(content, width, overflow, height)
+
+  defp build_prepared_content(%VirtualText{} = content, width, height, overflow),
+    do: TextLayout.prepare(content, width, overflow, height)
+
+  defp extract_line(content, offsets, line_no) do
+    start_offset = elem(offsets, line_no)
+    offset_count = tuple_size(offsets)
+
+    end_offset =
+      if line_no + 1 < offset_count do
+        elem(offsets, line_no + 1) - 1
+      else
+        byte_size(content)
+      end
+
+    :binary.part(content, start_offset, max(end_offset - start_offset, 0))
+  end
+
+  defp source_content(%VirtualText{} = content), do: content
+  defp source_content(content) when is_list(content), do: content
+  defp source_content(content) when is_binary(content), do: content
+
   defp to_termite(style) do
     Enum.reduce(style, Termite.Style.ansi256(), fn
       {_, nil}, t_style -> t_style
@@ -350,9 +521,34 @@ defmodule BackBreeze.Style do
   defp blank_rows(count, border, termite_style, inner_width) do
     Enum.map(1..count, fn _i ->
       BackBreeze.Border.render_left(border) <>
-        Termite.Style.render_to_string(termite_style, String.duplicate(" ", inner_width)) <>
+        render_styled_padding(termite_style, inner_width) <>
         BackBreeze.Border.render_right(border)
     end)
+  end
+
+  defp render_styled_text(_termite_style, ""), do: ""
+
+  defp render_styled_text(termite_style, content) do
+    Termite.Style.render_to_string(termite_style, content)
+  end
+
+  defp render_styled_row(termite_style, line, left_padding, right_padding) when is_binary(line) do
+    render_styled_text(
+      termite_style,
+      String.duplicate(" ", left_padding) <> line <> String.duplicate(" ", right_padding)
+    )
+  end
+
+  defp render_styled_row(termite_style, line, left_padding, right_padding) when is_list(line) do
+    render_styled_padding(termite_style, left_padding) <>
+      TextLayout.render_line(line, termite_style) <>
+      render_styled_padding(termite_style, right_padding)
+  end
+
+  defp render_styled_padding(_termite_style, count) when count <= 0, do: ""
+
+  defp render_styled_padding(termite_style, count) do
+    render_styled_text(termite_style, String.duplicate(" ", count))
   end
 
   defp horizontal_padding(:left, padding), do: {0, padding}
