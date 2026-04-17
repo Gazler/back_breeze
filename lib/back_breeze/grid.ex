@@ -219,7 +219,8 @@ defmodule BackBreeze.Grid do
         use_structured_simple_compose? = simple_compose_from_layer_maps?(rendered_children)
 
         cond do
-          simple_row_or_column? and grid.columns == 1 and gap_y == 0 ->
+          simple_row_or_column? and grid.columns == 1 and gap_y == 0 and
+              not use_structured_simple_compose? ->
             rows_with_results
             |> Enum.map(fn
               [%{result: %{box: item_box}}] ->
@@ -253,7 +254,7 @@ defmodule BackBreeze.Grid do
               BackBreeze.Box.compose_absolute_children_layer_map(
                 children,
                 width: total_width,
-                height: total_height,
+                height: compose_target_height(style.height, total_height),
                 clip: true,
                 sorted: true
               )
@@ -279,7 +280,7 @@ defmodule BackBreeze.Grid do
               BackBreeze.Box.compose_absolute_children_layer_map(
                 children,
                 width: total_width,
-                height: total_height,
+                height: compose_target_height(style.height, total_height),
                 clip: true,
                 sorted: true
               )
@@ -312,6 +313,14 @@ defmodule BackBreeze.Grid do
       is_integer(value) and value > 0 -> value
       value in @auto_sizes -> total
       true -> rendered || total
+    end
+  end
+
+  defp compose_target_height(value, total) do
+    case value do
+      extent when extent in [:screen, :full] -> total
+      extent when is_integer(extent) and extent > 0 -> total
+      _ -> nil
     end
   end
 

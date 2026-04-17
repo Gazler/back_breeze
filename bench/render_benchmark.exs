@@ -6,7 +6,8 @@ defmodule BackBreeze.RenderBenchmark do
 
   @default_iterations 50
   @warmup_iterations 5
-  @fixture_glob "bench/fixtures/*.etf"
+  @default_width 250
+  @default_height 34
 
   def run(argv) do
     {opts, _argv, _invalid} =
@@ -19,10 +20,15 @@ defmodule BackBreeze.RenderBenchmark do
           height: :integer,
           subtree_depth: :integer,
           top: :integer,
-          phase_profile: :boolean
+          phase_profile: :boolean,
+          cold: :boolean,
+          warmup: :integer
         ],
         aliases: [i: :iterations, s: :scenario]
       )
+
+    opts = apply_env_defaults(opts)
+    maybe_print_usage_summary(argv, opts)
 
     iterations = Keyword.get(opts, :iterations, @default_iterations)
     filter = Keyword.get(opts, :scenario)
@@ -30,10 +36,48 @@ defmodule BackBreeze.RenderBenchmark do
     subtree_depth = Keyword.get(opts, :subtree_depth)
     top = Keyword.get(opts, :top, 10)
     phase_profile? = Keyword.get(opts, :phase_profile, false)
+    cold? = Keyword.get(opts, :cold, false)
+    warmup_iterations = Keyword.get(opts, :warmup, @warmup_iterations)
+    width = Keyword.get(opts, :width, @default_width)
+    height = Keyword.get(opts, :height, @default_height)
 
-    scenarios(tree_file, Keyword.get(opts, :width, 250), Keyword.get(opts, :height, 34))
-    |> maybe_filter(filter, Keyword.get(opts, :width, 250), Keyword.get(opts, :height, 34))
-    |> Enum.each(&run_scenario(&1, iterations, subtree_depth, top, phase_profile?))
+    scenarios(tree_file, width, height)
+    |> maybe_filter(filter, width, height)
+    |> Enum.each(&run_scenario(&1, iterations, subtree_depth, top, phase_profile?, cold?, warmup_iterations))
+  end
+
+  defp maybe_print_usage_summary(argv, opts) do
+    if argv == [] and no_benchmark_overrides?(opts) do
+      IO.puts("""
+      render_benchmark.exs usage:
+        BACK_BREEZE_TREE_FILE=bench/fixtures/posting_tree.etf BACK_BREEZE_WIDTH=80 BACK_BREEZE_HEIGHT=30 mix run bench/render_benchmark.exs
+        BACK_BREEZE_TREE_FILE=bench/fixtures/posting_tree.etf BACK_BREEZE_WIDTH=80 BACK_BREEZE_HEIGHT=30 BACK_BREEZE_ITERATIONS=1 BACK_BREEZE_COLD=1 BACK_BREEZE_WARMUP=0 mix run bench/render_benchmark.exs
+
+      CLI equivalents:
+        mix run bench/render_benchmark.exs -- --scenario posting_tree --width 80 --height 30
+        mix run bench/render_benchmark.exs -- --tree_file bench/fixtures/posting_tree.etf --width 80 --height 30 --iterations 1 --cold --warmup 0
+
+      Environment variable equivalents:
+        BACK_BREEZE_SCENARIO
+        BACK_BREEZE_TREE_FILE
+        BACK_BREEZE_WIDTH
+        BACK_BREEZE_HEIGHT
+        BACK_BREEZE_ITERATIONS
+        BACK_BREEZE_COLD=1
+        BACK_BREEZE_WARMUP=0
+        BACK_BREEZE_PHASE_PROFILE=1
+        BACK_BREEZE_SUBTREE_DEPTH=3
+        BACK_BREEZE_TOP=10
+      """)
+    end
+  end
+
+  defp no_benchmark_overrides?(opts) do
+    Enum.all?(
+      [:iterations, :scenario, :tree_file, :width, :height, :subtree_depth, :top, :phase_profile,
+       :cold, :warmup],
+      &(not Keyword.has_key?(opts, &1))
+    )
   end
 
   defp maybe_filter(scenarios, nil, _width, _height), do: scenarios
@@ -52,7 +96,15 @@ defmodule BackBreeze.RenderBenchmark do
     end
   end
 
-  defp run_scenario({name, size, builder}, iterations, subtree_depth, top, phase_profile?) do
+  defp run_scenario(
+         {name, size, builder},
+         iterations,
+         subtree_depth,
+         top,
+         phase_profile?,
+         cold?,
+         warmup_iterations
+       ) do
     terminal = %Termite.Terminal{size: %{width: elem(size, 0), height: elem(size, 1)}}
     box = builder.()
 
@@ -63,12 +115,12 @@ defmodule BackBreeze.RenderBenchmark do
       BackBreeze.BenchProfile.disable!()
     end
 
-    Enum.each(1..@warmup_iterations, fn _ ->
-      Box.render_with_dimensions(box, terminal: terminal)
-    end)
+    warmup(box, terminal, cold?, warmup_iterations)
 
     {times, %{box: rendered_box, dimensions: dimensions}} =
       Enum.reduce(1..iterations, {[], nil}, fn _, {times, _last_result} ->
+        maybe_reset_caches(cold?)
+
         {us, result} =
           :timer.tc(fn ->
             Box.render_with_dimensions(box, terminal: terminal)
@@ -95,7 +147,7 @@ defmodule BackBreeze.RenderBenchmark do
     end
 
     if is_integer(subtree_depth) do
-      print_subtree_breakdown(box, terminal, iterations, subtree_depth, top)
+      print_subtree_breakdown(box, terminal, iterations, subtree_depth, top, cold?, warmup_iterations)
     end
   end
 
@@ -110,13 +162,14 @@ defmodule BackBreeze.RenderBenchmark do
     end)
   end
 
-  defp print_subtree_breakdown(box, terminal, iterations, subtree_depth, top) do
+  defp print_subtree_breakdown(box, terminal, iterations, subtree_depth, top, cold?, warmup_iterations) do
     IO.puts("  subtree breakdown (depth=#{subtree_depth}, top=#{top}):")
 
     box
     |> subtrees_at_depth(subtree_depth)
     |> Enum.map(fn {path, subtree} ->
-      {avg_us, rendered} = measure(subtree, terminal, max(div(iterations, 2), 5))
+      {avg_us, rendered} =
+        measure(subtree, terminal, max(div(iterations, 2), 5), cold?, warmup_iterations)
 
       %{
         path: Enum.join(path, "."),
@@ -149,13 +202,12 @@ defmodule BackBreeze.RenderBenchmark do
     |> Enum.flat_map(fn {child, index} -> do_subtrees_at_depth(child, depth - 1, path ++ [index]) end)
   end
 
-  defp measure(box, terminal, iterations) do
-    Enum.each(1..@warmup_iterations, fn _ ->
-      Box.render_with_dimensions(box, terminal: terminal)
-    end)
+  defp measure(box, terminal, iterations, cold?, warmup_iterations) do
+    warmup(box, terminal, cold?, warmup_iterations)
 
     samples =
       Enum.map(1..iterations, fn _ ->
+        maybe_reset_caches(cold?)
         :timer.tc(fn -> Box.render_with_dimensions(box, terminal: terminal) end)
       end)
 
@@ -166,6 +218,22 @@ defmodule BackBreeze.RenderBenchmark do
 
   defp avg(values), do: Enum.sum(values) / max(length(values), 1)
 
+  defp warmup(_box, _terminal, _cold?, warmup_iterations) when warmup_iterations <= 0, do: :ok
+
+  defp warmup(box, terminal, cold?, warmup_iterations) do
+    Enum.each(1..warmup_iterations, fn _ ->
+      maybe_reset_caches(cold?)
+      Box.render_with_dimensions(box, terminal: terminal)
+    end)
+  end
+
+  defp maybe_reset_caches(true) do
+    BackBreeze.RenderCache.clear()
+    BackBreeze.PreparedContentStore.clear()
+  end
+
+  defp maybe_reset_caches(false), do: :ok
+
   defp percentile(values, percentile) do
     sorted = Enum.sort(values)
     index = min(max(round((length(sorted) - 1) * percentile), 0), length(sorted) - 1)
@@ -175,9 +243,60 @@ defmodule BackBreeze.RenderBenchmark do
   defp format_us(us) when is_float(us), do: :erlang.float_to_binary(us / 1_000, decimals: 2) <> "ms"
   defp format_us(us), do: format_us(us * 1.0)
 
+  defp apply_env_defaults(opts) do
+    opts
+    |> put_env_integer(:iterations, "BACK_BREEZE_ITERATIONS")
+    |> put_env_string(:scenario, "BACK_BREEZE_SCENARIO")
+    |> put_env_string(:tree_file, "BACK_BREEZE_TREE_FILE")
+    |> put_env_integer(:width, "BACK_BREEZE_WIDTH")
+    |> put_env_integer(:height, "BACK_BREEZE_HEIGHT")
+    |> put_env_integer(:subtree_depth, "BACK_BREEZE_SUBTREE_DEPTH")
+    |> put_env_integer(:top, "BACK_BREEZE_TOP")
+    |> put_env_boolean(:phase_profile, "BACK_BREEZE_PHASE_PROFILE")
+    |> put_env_boolean(:cold, "BACK_BREEZE_COLD")
+    |> put_env_integer(:warmup, "BACK_BREEZE_WARMUP")
+  end
+
+  defp put_env_integer(opts, key, env_name) do
+    case {Keyword.has_key?(opts, key), System.get_env(env_name)} do
+      {true, _} ->
+        opts
+
+      {false, nil} ->
+        opts
+
+      {false, value} ->
+        case Integer.parse(value) do
+          {parsed, ""} -> Keyword.put(opts, key, parsed)
+          _ -> opts
+        end
+    end
+  end
+
+  defp put_env_string(opts, key, env_name) do
+    case {Keyword.has_key?(opts, key), System.get_env(env_name)} do
+      {true, _} -> opts
+      {false, nil} -> opts
+      {false, value} when value != "" -> Keyword.put(opts, key, value)
+      {false, _} -> opts
+    end
+  end
+
+  defp put_env_boolean(opts, key, env_name) do
+    case {Keyword.has_key?(opts, key), System.get_env(env_name)} do
+      {true, _} ->
+        opts
+
+      {false, value} when value in ["1", "true", "TRUE", "yes", "YES"] ->
+        Keyword.put(opts, key, true)
+
+      {false, _} ->
+        opts
+    end
+  end
+
   defp scenarios(nil, _width, _height) do
-    fixture_scenarios() ++
-      [
+    [
       {"flat_text", {80, 24}, &flat_text/0},
       {"stacked_blocks", {80, 24}, &stacked_blocks/0},
       {"nested_grid", {80, 24}, &nested_grid/0},
@@ -190,16 +309,7 @@ defmodule BackBreeze.RenderBenchmark do
   defp scenarios(tree_file, width, height) do
     [
       {fixture_name(tree_file), {width, height}, fn -> load_tree!(tree_file) end}
-      | scenarios(nil, width, height)
     ]
-  end
-
-  defp fixture_scenarios do
-    @fixture_glob
-    |> Path.wildcard()
-    |> Enum.map(fn path ->
-      {fixture_name(path), {250, 36}, fn -> load_tree!(path) end}
-    end)
   end
 
   defp fixture_name(path) do

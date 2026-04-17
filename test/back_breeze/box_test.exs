@@ -319,7 +319,7 @@ defmodule BackBreeze.BoxTest do
 
       assert rendered.content ==
                "\e[48;5;0m  \e[0m\e[1;48;5;0;38;5;5mEsc\e[0m\e[48;5;0m Close  \e[0m" <>
-                 "\e[1;48;5;0;38;5;5mEnter\e[0m\e[48;5;0m Save  \e[0m"
+                 "\e[1;48;5;0;38;5;5mEnter\e[0m\e[48;5;0m Save \e[0m"
     end
 
     test "renders a tree with empty absolute nesting" do

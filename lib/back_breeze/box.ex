@@ -10,6 +10,7 @@ defmodule BackBreeze.Box do
   alias BackBreeze.VirtualText
 
   @wide_glyph_key :__wide_glyphs__
+  @default_fill_key :__default_fill__
 
   defstruct content: "",
             children: [],
@@ -110,8 +111,8 @@ defmodule BackBreeze.Box do
 
     RenderCache.with_frame(fn ->
       RenderCache.fetch_stable(
-        {:render_structured_with_dimensions,
-         if(terminal, do: terminal.size, else: nil), box_cache_key(box)},
+        {:render_structured_with_dimensions, if(terminal, do: terminal.size, else: nil),
+         box_cache_key(box)},
         fn ->
           %{box: box, dimensions: dimensions} =
             render_and_calc(
@@ -170,10 +171,16 @@ defmodule BackBreeze.Box do
         {start_x, start_y} = {box.left || 0, box.top || 0}
 
         {map, width, height} =
-          if layer_map_entries?(box.layer_map) do
-            merge_layer_map(layer_map, box.layer_map, start_x, start_y)
-          else
-            generate_layer_map(box.content, layer_map, start_x, start_y)
+          cond do
+            layer_map_entries?(box.layer_map) and map_size(layer_map) == 0 and start_x == 0 and
+                start_y == 0 ->
+              {box.layer_map, max((box.width || 0) - 1, 0), max((box.height || 0) - 1, 0)}
+
+            layer_map_entries?(box.layer_map) ->
+              merge_layer_map(layer_map, box.layer_map, start_x, start_y)
+
+            true ->
+              generate_layer_map(box.content, layer_map, start_x, start_y)
           end
 
         {map, max(max_width, width), max(max_height, height)}
@@ -292,10 +299,26 @@ defmodule BackBreeze.Box do
 
     structured? = Keyword.get(opts, :structured, false)
     children_content_height = content_height(children, box.display)
-    overlay_only_children? = children != [] and Enum.all?(children, &(&1.position == :absolute or &1.overlay?))
+
+    overlay_only_children? =
+      children != [] and Enum.all?(children, &(&1.position == :absolute or &1.overlay?))
+
     preserve_base_scroll? = renderable_content?(box.content) and overlay_only_children?
 
     cond do
+      not structured? and
+          wrappable_single_child_container?(box, children, child_layer_map, has_overlay_children?) ->
+        render_wrapped_content_container(
+          acc,
+          prev_id,
+          box,
+          child_layer_map,
+          child_width,
+          child_height,
+          child_layer,
+          opts
+        )
+
       not structured? and
         is_binary(child_layer_map) and box.scroll == {0, 0} and
         box.style.scrollbar == false and not has_overlay_children? and
@@ -307,6 +330,23 @@ defmodule BackBreeze.Box do
           prev_id,
           box,
           child_layer_map,
+          child_width,
+          child_height,
+          child_layer,
+          opts
+        )
+
+      not structured? and
+        is_binary(child_layer_map) and box.scroll == {0, 0} and
+        box.style.scrollbar == false and not has_overlay_children? and
+          plain_hidden_wrapper_style?(box) ->
+        render_wrapped_content_container(
+          acc,
+          prev_id,
+          box,
+          child_layer_map,
+          child_width,
+          child_height,
           child_layer,
           opts
         )
@@ -320,6 +360,21 @@ defmodule BackBreeze.Box do
           child_height,
           child_layer,
           opts
+        )
+
+      not structured? and
+          layer_map_passthrough_hidden_wrapper?(
+            box,
+            children,
+            child_layer_map,
+            has_overlay_children?
+          ) ->
+        render_passthrough_layer_map_container(
+          acc,
+          prev_id,
+          box,
+          hd(children),
+          child_layer
         )
 
       true ->
@@ -420,10 +475,20 @@ defmodule BackBreeze.Box do
         rendered_width = raw_content_width(content)
 
         {layer_map, max_width, max_height} =
-          BenchProfile.measure({__MODULE__, :container_base_layer}, fn ->
-            cached_blank_container_layer_map(box, rendered_width, dimensions.height) ||
-              cached_generate_layer_map(content)
-          end)
+          if skip_container_base_layer?(
+               box,
+               children,
+               has_overlay_children?,
+               rendered_width,
+               dimensions.height
+             ) do
+            {%{}, max(rendered_width - 1, 0), max(dimensions.height - 1, 0)}
+          else
+            BenchProfile.measure({__MODULE__, :container_base_layer}, fn ->
+              cached_blank_container_layer_map(box, rendered_width, dimensions.height) ||
+                cached_generate_layer_map(content)
+            end)
+          end
 
         max_height = max(max_height, max(rendered_height(content) - 1, 0))
 
@@ -459,11 +524,18 @@ defmodule BackBreeze.Box do
             child_layer_map
           end
 
+        {child_merge_width, child_merge_height} =
+          if layer_map_entries?(child_layer_map) do
+            {max(child_width - 1, 0), max(child_height - 1, 0)}
+          else
+            {child_width, child_height}
+          end
+
         max_width =
           if box.style.overflow == :hidden do
             max_width
           else
-            max(max_width, child_width)
+            max(max_width, child_merge_width)
           end
 
         max_height =
@@ -473,10 +545,10 @@ defmodule BackBreeze.Box do
 
             box.style.height in [:auto, :full] ||
                 (is_integer(box.style.height) && box.style.height <= 0) ->
-              max(max_height, child_height)
+              max(max_height, child_merge_height)
 
-            has_overlay_children? ->
-              max(max_height, child_height)
+            has_overlay_children? and box.style.height not in [:screen, :full] ->
+              max(max_height, child_merge_height)
 
             true ->
               max_height
@@ -496,7 +568,8 @@ defmodule BackBreeze.Box do
 
         merged_layer_map =
           BenchProfile.measure({__MODULE__, :merge_layer_maps}, fn ->
-            Map.merge(layer_map, child_layer_map)
+            merge_layer_map(layer_map, child_layer_map, 0, 0)
+            |> elem(0)
           end)
 
         content =
@@ -526,6 +599,40 @@ defmodule BackBreeze.Box do
 
         %{acc | box: box}
     end
+  end
+
+  defp render_passthrough_layer_map_container(
+         %{box: box} = acc,
+         prev_id,
+         _box,
+         child,
+         child_layer
+       ) do
+    dimensions =
+      %{
+        width: child.width,
+        viewport_width: child.width,
+        content_width: child.width,
+        height: child.height,
+        viewport_height: child.height,
+        content_height: child.height,
+        left: 0,
+        top: 0
+      }
+
+    box = %{
+      box
+      | content: child.content,
+        width: child.width,
+        height: child.height,
+        layer: max(box.layer || 0, child_layer || 0),
+        state: :rendered,
+        children: [],
+        layer_map: child.layer_map,
+        overlay?: false
+    }
+
+    %{acc | box: box, dimensions: [{prev_id, dimensions} | acc.dimensions], id: acc.id}
   end
 
   defp render_plain_content_container(
@@ -571,11 +678,54 @@ defmodule BackBreeze.Box do
          prev_id,
          box,
          child_content,
+         child_width,
+         child_height,
          child_layer,
          opts
        ) do
+    style_width = if box.style.width == :auto, do: 0, else: box.style.width
+
+    width =
+      cond do
+        is_integer(box.style.width) and box.style.width > 0 ->
+          box.style.width
+
+        true ->
+          max(
+            style_width,
+            child_width + padding_horizontal(box.style) + border_horizontal(box.style.border)
+          )
+      end
+
+    style_height = if box.style.height == :auto, do: 0, else: box.style.height
+
+    height =
+      cond do
+        is_integer(box.style.height) and box.style.height > 0 ->
+          box.style.height
+
+        true ->
+          max(
+            style_height,
+            child_height + padding_vertical(box.style) + border_vertical(box.style.border)
+          )
+      end
+
+    style = %{box.style | width: width, height: height}
+
     {content, dimensions, width} =
-      render_self(%{box | content: child_content, children: [], scroll: {0, 0}}, opts)
+      render_self(
+        %{
+          box
+          | content: child_content,
+            children: [],
+            scroll: {0, 0},
+            width: width,
+            height: height,
+            style: style
+        },
+        opts
+      )
 
     box = %{
       box
@@ -618,6 +768,15 @@ defmodule BackBreeze.Box do
     %{box | style: style}
   end
 
+  defp normalize_grid_container_box(box) do
+    style =
+      box.style
+      |> maybe_resolve_render_self_extent(:width, box.width)
+      |> maybe_resolve_render_self_extent(:height, box.height)
+
+    %{box | style: style}
+  end
+
   defp maybe_resolve_render_self_extent(style, _field, value) when not is_integer(value),
     do: style
 
@@ -637,6 +796,8 @@ defmodule BackBreeze.Box do
          %{box: %{children: children, display: %BackBreeze.Grid{}} = box} = acc,
          opts
        ) do
+    box = normalize_grid_container_box(box)
+
     %{
       width: item_width,
       height: item_height,
@@ -801,6 +962,9 @@ defmodule BackBreeze.Box do
       }
 
       {layer_map, width, height, acc} = combine_children(box, absolutes, relative, acc, opts)
+      width = max(width, raw_content_width(content))
+      height = max(height, rendered_height(content))
+
       {layer_map, width, height, has_overlay_children?, layer, children, acc}
     end
   end
@@ -882,6 +1046,13 @@ defmodule BackBreeze.Box do
     relative_has_overlay? =
       Enum.any?(relative, & &1.overlay?)
 
+    overlay_absolutes =
+      children
+      |> Enum.filter(&(not overlay_position?(&1) and &1.overlay?))
+      |> Enum.map(&%{&1 | position: :absolute})
+
+    absolutes = Enum.filter(children, &overlay_position?/1) ++ overlay_absolutes
+
     resolved_join_height =
       cond do
         box.display == :block && relative_has_overlay? && box.style.overflow != :hidden ->
@@ -898,7 +1069,13 @@ defmodule BackBreeze.Box do
 
     {content, width, height, relative_layer_map} =
       BenchProfile.measure({__MODULE__, :flow_join}, fn ->
-        if structured? and structured_block_layer_map?(box, relative) do
+        if retain_block_layer_map_for_combine?(
+             box,
+             relative,
+             absolutes,
+             relative_has_overlay?,
+             structured?
+           ) do
           {width, height, layer_map} = compose_block_children_layer_map(relative, box)
           {nil, width, height, layer_map}
         else
@@ -913,13 +1090,6 @@ defmodule BackBreeze.Box do
           {content, width, height, %{}}
         end
       end)
-
-    overlay_absolutes =
-      children
-      |> Enum.filter(&(not overlay_position?(&1) and &1.overlay?))
-      |> Enum.map(&%{&1 | position: :absolute})
-
-    absolutes = Enum.filter(children, &overlay_position?/1) ++ overlay_absolutes
 
     relative = %{
       box
@@ -939,7 +1109,10 @@ defmodule BackBreeze.Box do
          plain_content_children?(box, absolutes, has_overlay_children?, relative_has_overlay?) do
       {content, width, height, false, layer, children, acc}
     else
+      {origin_x, origin_y} = content_origin(box.style)
       {layer_map, width, height, acc} = combine_children(box, absolutes, relative, acc, opts)
+      width = max(width + 1 - origin_x, raw_content_width(content))
+      height = max(height + 1 - origin_y, rendered_height(content))
       {layer_map, width, height, has_overlay_children?, layer, children, acc}
     end
   end
@@ -986,7 +1159,12 @@ defmodule BackBreeze.Box do
     {start_x, start_y} = content_origin(box.style)
 
     if layer_map_entries?(relative.layer_map) do
-      merge_layer_map(%{}, relative.layer_map, start_x, start_y)
+      if start_x == 0 and start_y == 0 do
+        {relative.layer_map, max((relative.width || 0) - 1, 0),
+         max((relative.height || 0) - 1, 0)}
+      else
+        merge_layer_map(%{}, relative.layer_map, start_x, start_y)
+      end
     else
       generate_layer_map(relative.content, %{}, start_x, start_y)
     end
@@ -999,7 +1177,12 @@ defmodule BackBreeze.Box do
 
     {base_map, base_width, base_height} =
       if layer_map_entries?(relative.layer_map) do
-        merge_layer_map(%{}, relative.layer_map, rel_x, rel_y)
+        if rel_x == 0 and rel_y == 0 do
+          {relative.layer_map, max((relative.width || 0) - 1, 0),
+           max((relative.height || 0) - 1, 0)}
+        else
+          merge_layer_map(%{}, relative.layer_map, rel_x, rel_y)
+        end
       else
         generate_layer_map(relative.content, %{}, rel_x, rel_y)
       end
@@ -1137,7 +1320,12 @@ defmodule BackBreeze.Box do
 
     {map, width, height} =
       if layer_map_entries?(rendered_box.layer_map) do
-        merge_layer_map(layer_map, rendered_box.layer_map, start_x, start_y)
+        if map_size(layer_map) == 0 and start_x == 0 and start_y == 0 do
+          {rendered_box.layer_map, max((rendered_box.width || 0) - 1, 0),
+           max((rendered_box.height || 0) - 1, 0)}
+        else
+          merge_layer_map(layer_map, rendered_box.layer_map, start_x, start_y)
+        end
       else
         generate_layer_map(rendered_box.content, layer_map, start_x, start_y)
       end
@@ -1146,12 +1334,16 @@ defmodule BackBreeze.Box do
   end
 
   defp merge_layer_map(target_map, source_map, offset_x, offset_y) do
+    target_map = clear_fill_covered_cells(target_map, source_map, offset_x, offset_y)
     wide_glyphs? = has_wide_glyphs?(target_map) or has_wide_glyphs?(source_map)
-    preserve_plain_spaces? = has_wide_glyphs?(source_map)
+    preserve_plain_spaces? = has_wide_glyphs?(source_map) or map_size(target_map) == 0
 
     {map, max_x, max_y} =
       Enum.reduce(source_map, {target_map, 0, 0}, fn
         {@wide_glyph_key, true}, acc ->
+          acc
+
+        {@default_fill_key, _value}, acc ->
           acc
 
         {{_y, _x}, {" ", ""}}, acc when not preserve_plain_spaces? ->
@@ -1174,13 +1366,53 @@ defmodule BackBreeze.Box do
       end)
 
     map =
-      if wide_glyphs? and map_size(map) > 0 do
-        Map.put(map, @wide_glyph_key, true)
-      else
-        map
-      end
+      map
+      |> maybe_mark_wide_glyph_metadata(wide_glyphs?)
+      |> merge_default_fills(target_map, source_map, offset_x, offset_y)
 
     {map, max_x, max_y}
+  end
+
+  defp clear_fill_covered_cells(target_map, source_map, offset_x, offset_y) do
+    fills = shifted_default_fill_entries(source_map, offset_x, offset_y)
+
+    if fills == [] do
+      target_map
+    else
+      Enum.reduce(target_map, %{}, fn
+        {@wide_glyph_key, true}, acc ->
+          Map.put(acc, @wide_glyph_key, true)
+
+        {@default_fill_key, value}, acc ->
+          Map.put(acc, @default_fill_key, value)
+
+        {{y, x} = key, value}, acc ->
+          if point_in_any_fill?(x, y, fills) do
+            acc
+          else
+            Map.put(acc, key, value)
+          end
+      end)
+    end
+  end
+
+  defp merge_default_fills(map, target_map, source_map, offset_x, offset_y) do
+    fills =
+      shifted_default_fill_entries(source_map, offset_x, offset_y) ++
+        default_fill_entries(target_map)
+
+    if fills == [] do
+      Map.delete(map, @default_fill_key)
+    else
+      Map.put(map, @default_fill_key, fills)
+    end
+  end
+
+  defp point_in_any_fill?(x, y, fills) do
+    Enum.any?(fills, fn
+      {_point, left, top, right, bottom} ->
+        x >= left and x <= right and y >= top and y <= bottom
+    end)
   end
 
   defp generate_layer_map(content, layer_map, start_x, y) do
@@ -1246,11 +1478,11 @@ defmodule BackBreeze.Box do
 
     map =
       if fill_seq != "" and inner_left <= inner_right and inner_top <= inner_bottom do
-        Enum.reduce(inner_top..inner_bottom, map, fn y, acc ->
-          Enum.reduce(inner_left..inner_right, acc, fn x, inner_acc ->
-            Map.put(inner_acc, {y, x}, {" ", fill_seq})
-          end)
-        end)
+        Map.put(
+          map,
+          @default_fill_key,
+          [{{" ", fill_seq}, inner_left, inner_top, inner_right, inner_bottom}]
+        )
       else
         map
       end
@@ -1582,7 +1814,10 @@ defmodule BackBreeze.Box do
             Enum.reduce(start_x..max_x, {[], [], "", false}, fn x,
                                                                 {segments, buffer, last_style,
                                                                  skip} ->
-              point = if skip, do: :skip, else: Map.get(layer_map, {y, x})
+              point =
+                if skip,
+                  do: :skip,
+                  else: Map.get(layer_map, {y, x}) || default_fill_at(layer_map, y, x)
 
               skip_next =
                 case point do
@@ -1641,13 +1876,14 @@ defmodule BackBreeze.Box do
             Enum.reduce(start_x..max_x, {[], [], "", false}, fn x,
                                                                 {segments, buffer, last_style,
                                                                  skip} ->
-              overlay_point = Map.get(overlay_layer_map, {y, x})
+              overlay_point =
+                Map.get(overlay_layer_map, {y, x}) || default_fill_at(overlay_layer_map, y, x)
 
               point =
                 if skip do
                   overlay_point
                 else
-                  overlay_point || Map.get(layer_map, {y, x})
+                  overlay_point || Map.get(layer_map, {y, x}) || default_fill_at(layer_map, y, x)
                 end
 
               skip_next =
@@ -1777,6 +2013,9 @@ defmodule BackBreeze.Box do
         {@wide_glyph_key, true}, acc ->
           acc
 
+        {@default_fill_key, _value}, acc ->
+          acc
+
         {{y, x}, value}, acc when y >= start_y and y <= max_y and x >= start_x and x <= max_x ->
           Map.put(acc, {y, x}, value)
 
@@ -1784,17 +2023,15 @@ defmodule BackBreeze.Box do
           acc
       end)
 
-    if has_wide_glyphs?(layer_map) and map_size(filtered) > 0 do
-      Map.put(filtered, @wide_glyph_key, true)
-    else
-      filtered
-    end
+    filtered
+    |> maybe_mark_wide_glyph_metadata(has_wide_glyphs?(layer_map) and map_size(filtered) > 0)
+    |> maybe_clip_default_fill(layer_map, start_x, start_y, max_x, max_y)
   end
 
   defp has_wide_glyphs?(layer_map), do: Map.get(layer_map, @wide_glyph_key, false)
 
   defp layer_map_entries?(layer_map) do
-    map_size(layer_map) > if(has_wide_glyphs?(layer_map), do: 1, else: 0)
+    map_size(layer_map) > layer_map_metadata_count(layer_map)
   end
 
   defp wide_continuation?(layer_map, y, x) when x > 0 do
@@ -1818,6 +2055,9 @@ defmodule BackBreeze.Box do
         {@wide_glyph_key, true}, acc ->
           acc
 
+        {@default_fill_key, _value}, acc ->
+          acc
+
         {{y, x}, value}, acc when x >= left and x <= right and y >= top and y <= bottom ->
           Map.put(acc, {y, x}, value)
 
@@ -1825,11 +2065,9 @@ defmodule BackBreeze.Box do
           acc
       end)
 
-    if has_wide_glyphs?(layer_map) and map_size(clipped) > 0 do
-      Map.put(clipped, @wide_glyph_key, true)
-    else
-      clipped
-    end
+    clipped
+    |> maybe_mark_wide_glyph_metadata(has_wide_glyphs?(layer_map) and map_size(clipped) > 0)
+    |> maybe_clip_default_fill(layer_map, left, top, right, bottom)
   end
 
   defp clip_child_layer_map(layer_map, _style, _width, _height), do: layer_map
@@ -1868,6 +2106,9 @@ defmodule BackBreeze.Box do
         {@wide_glyph_key, true}, acc ->
           acc
 
+        {@default_fill_key, _value}, acc ->
+          acc
+
         {{y, x}, value}, acc ->
           Map.put(acc, {y + shift_y, x + shift_x}, value)
 
@@ -1875,11 +2116,9 @@ defmodule BackBreeze.Box do
           acc
       end)
 
-    if has_wide_glyphs?(layer_map) and map_size(shifted) > 0 do
-      Map.put(shifted, @wide_glyph_key, true)
-    else
-      shifted
-    end
+    shifted
+    |> maybe_mark_wide_glyph_metadata(has_wide_glyphs?(layer_map) and map_size(shifted) > 0)
+    |> maybe_shift_default_fill(layer_map, shift_x, shift_y)
   end
 
   defp add_layer_codepoint(codepoint, map, x, y, max_x, current_seq, seq, active_seq)
@@ -1897,6 +2136,82 @@ defmodule BackBreeze.Box do
 
   defp maybe_mark_wide_glyph(map, width) when width > 1, do: Map.put(map, @wide_glyph_key, true)
   defp maybe_mark_wide_glyph(map, _width), do: map
+
+  defp maybe_mark_wide_glyph_metadata(map, true) when map_size(map) > 0,
+    do: Map.put(map, @wide_glyph_key, true)
+
+  defp maybe_mark_wide_glyph_metadata(map, _value), do: Map.delete(map, @wide_glyph_key)
+
+  defp default_fill_at(layer_map, y, x) do
+    Enum.find_value(default_fill_entries(layer_map), fn
+      {{_char, _style} = point, left, top, right, bottom}
+      when x >= left and x <= right and y >= top and y <= bottom ->
+        point
+
+      _ ->
+        nil
+    end)
+  end
+
+  defp maybe_clip_default_fill(map, source_map, start_x, start_y, max_x, max_y) do
+    fills =
+      source_map
+      |> default_fill_entries()
+      |> Enum.flat_map(fn
+        {{_char, _style} = point, left, top, right, bottom} ->
+          clipped_left = max(left, start_x)
+          clipped_top = max(top, start_y)
+          clipped_right = min(right, max_x)
+          clipped_bottom = min(bottom, max_y)
+
+          if clipped_left <= clipped_right and clipped_top <= clipped_bottom do
+            [{point, clipped_left, clipped_top, clipped_right, clipped_bottom}]
+          else
+            []
+          end
+      end)
+
+    if fills == [] do
+      Map.delete(map, @default_fill_key)
+    else
+      Map.put(map, @default_fill_key, fills)
+    end
+  end
+
+  defp maybe_shift_default_fill(map, source_map, shift_x, shift_y) do
+    fills = shifted_default_fill_entries(source_map, shift_x, shift_y)
+
+    if fills == [] do
+      Map.delete(map, @default_fill_key)
+    else
+      Map.put(map, @default_fill_key, fills)
+    end
+  end
+
+  defp default_fill_entries(layer_map) when is_map(layer_map) do
+    layer_map
+    |> Map.get(@default_fill_key)
+    |> default_fill_entries()
+  end
+
+  defp default_fill_entries(nil), do: []
+  defp default_fill_entries([]), do: []
+  defp default_fill_entries([_ | _] = fills), do: fills
+  defp default_fill_entries({_point, _left, _top, _right, _bottom} = fill), do: [fill]
+
+  defp shifted_default_fill_entries(source_map, shift_x, shift_y) do
+    source_map
+    |> default_fill_entries()
+    |> Enum.map(fn
+      {{_char, _style} = point, left, top, right, bottom} ->
+        {point, left + shift_x, top + shift_y, right + shift_x, bottom + shift_y}
+    end)
+  end
+
+  defp layer_map_metadata_count(layer_map) do
+    if(has_wide_glyphs?(layer_map), do: 1, else: 0) +
+      if Map.has_key?(layer_map, @default_fill_key), do: 1, else: 0
+  end
 
   defp raw_content_width(content) when is_binary(content), do: content_metrics(content) |> elem(0)
 
@@ -1962,7 +2277,7 @@ defmodule BackBreeze.Box do
       w when is_integer(w) ->
         max(w - border_horizontal(style.border) - padding_horizontal(style), 0)
 
-      :screen ->
+      extent when extent in [:screen, :full] ->
         {screen_width, _screen_height} =
           BackBreeze.screen_dimensions(Keyword.get(opts, :terminal))
 
@@ -1983,7 +2298,7 @@ defmodule BackBreeze.Box do
       h when is_integer(h) ->
         max(h - border_vertical(style.border) - padding_vertical(style), 0)
 
-      :screen ->
+      extent when extent in [:screen, :full] ->
         {_screen_width, screen_height} =
           BackBreeze.screen_dimensions(Keyword.get(opts, :terminal))
 
@@ -2176,7 +2491,38 @@ defmodule BackBreeze.Box do
   end
 
   defp child_extent(child, :inline), do: child.width || raw_content_width(child.content)
-  defp child_extent(child, _display), do: child.height || rendered_height(child.content)
+
+  defp child_extent(child, _display) do
+    positive_size(child.height) ||
+      positive_size(layer_map_height(child.layer_map)) ||
+      positive_size(rendered_height(child.content)) ||
+      1
+  end
+
+  defp positive_size(value) when is_integer(value) and value > 0, do: value
+  defp positive_size(_value), do: nil
+
+  defp layer_map_height(layer_map) when map_size(layer_map) == 0, do: nil
+
+  defp layer_map_height(layer_map) do
+    explicit_max_y =
+      Enum.reduce(layer_map, nil, fn
+        {{y, _x}, _value}, nil -> y
+        {{y, _x}, _value}, acc -> max(acc, y)
+        _, acc -> acc
+      end)
+
+    fill_max_y =
+      case default_fill_entries(layer_map) do
+        [] -> nil
+        fills -> fills |> Enum.map(&elem(&1, 4)) |> Enum.max()
+      end
+
+    case Enum.reject([explicit_max_y, fill_max_y], &is_nil/1) do
+      [] -> nil
+      values -> Enum.max(values) + 1
+    end
+  end
 
   defp append_rendered_child_dimensions(acc, dimensions, left_offset, top_offset) do
     shifted =
@@ -2207,17 +2553,28 @@ defmodule BackBreeze.Box do
       relative != []
   end
 
+  defp retain_block_layer_map_for_combine?(
+         box,
+         relative,
+         absolutes,
+         relative_has_overlay?,
+         structured?
+       ) do
+    structured_block_layer_map?(box, relative) and
+      (structured? or absolutes != [] or relative_has_overlay?) and
+      Enum.any?(relative, &layer_map_entries?(&1.layer_map))
+  end
+
   defp compose_block_children_layer_map(relative, box) do
-    border_left = border_left_offset(box.style.border)
-    border_top = border_top_offset(box.style.border)
+    {content_left, content_top} = content_origin(box.style)
 
     children =
       Enum.map(relative, fn child ->
         %{
           child
           | position: :absolute,
-            left: max((child.left || 0) - border_left, 0),
-            top: max((child.top || 0) - border_top, 0)
+            left: max((child.left || 0) - content_left, 0),
+            top: max((child.top || 0) - content_top, 0)
         }
       end)
 
@@ -2234,7 +2591,8 @@ defmodule BackBreeze.Box do
   end
 
   defp maybe_flatten_rendered_box(%{box: box} = result, opts) do
-    if is_binary(box.content) and not Keyword.get(opts, :structured, false) do
+    if is_binary(box.content) and not Keyword.get(opts, :structured, false) and
+         not layer_map_entries?(box.layer_map) do
       %{result | box: %{box | layer_map: %{}}}
     else
       result
@@ -2306,6 +2664,103 @@ defmodule BackBreeze.Box do
       not has_overlay_children? and not relative_has_overlay? and plain_wrapper_style?(box)
   end
 
+  defp wrappable_single_child_container?(box, children, child_content, has_overlay_children?)
+       when is_binary(child_content) do
+    box.content == "" and
+      box.display == :block and
+      box.scroll == {0, 0} and
+      box.style.scrollbar == false and
+      not reflowing_full_extent_wrapper?(box.style) and
+      not has_overlay_children? and
+      single_relative_child?(children)
+  end
+
+  defp wrappable_single_child_container?(_box, _children, _child_content, _has_overlay_children?),
+    do: false
+
+  defp single_relative_child?([%{position: position}])
+       when position != :absolute and position != :fixed,
+       do: true
+
+  defp single_relative_child?(_children), do: false
+
+  defp reflowing_full_extent_wrapper?(style) do
+    (style.width in [:full, :screen] or style.height in [:full, :screen]) and
+      (padding_horizontal(style) > 0 or padding_vertical(style) > 0 or
+         border_horizontal(style.border) > 0 or border_vertical(style.border) > 0)
+  end
+
+  defp layer_map_passthrough_hidden_wrapper?(
+         box,
+         children,
+         child_layer_map,
+         has_overlay_children?
+       ) do
+    box.content == "" and
+      box.scroll == {0, 0} and
+      box.style.scrollbar == false and
+      not has_overlay_children? and
+      single_relative_child?(children) and
+      layer_map_entries?(child_layer_map) and
+      plain_hidden_wrapper_style?(box)
+  end
+
+  defp skip_container_base_layer?(
+         box,
+         children,
+         has_overlay_children?,
+         rendered_width,
+         rendered_height
+       ) do
+    with %{style: child_style, width: child_width, height: child_height, left: left, top: top} <-
+           single_relative_child_box(children),
+         true <- is_integer(child_width) and is_integer(child_height),
+         true <- empty_passthrough_container?(box, has_overlay_children?),
+         true <- child_origin_is_zero?(left, top),
+         true <-
+           child_fills_container?(child_width, child_height, rendered_width, rendered_height),
+         true <- matching_text_styles?(box.style, child_style) do
+      true
+    else
+      _ -> false
+    end
+  end
+
+  defp empty_passthrough_container?(box, has_overlay_children?) do
+    box.content == "" and
+      not has_overlay_children? and
+      box.scroll == {0, 0} and
+      box.style.border == BackBreeze.Border.none() and
+      zero_padding?(box.style)
+  end
+
+  defp zero_padding?(style) do
+    style_value(style, :padding_left) == 0 and
+      style_value(style, :padding_right) == 0 and
+      style_value(style, :padding_top) == 0 and
+      style_value(style, :padding_bottom) == 0
+  end
+
+  defp child_origin_is_zero?(left, top), do: left in [nil, 0] and top in [nil, 0]
+
+  defp child_fills_container?(child_width, child_height, rendered_width, rendered_height) do
+    child_width >= rendered_width and child_height >= rendered_height
+  end
+
+  defp matching_text_styles?(parent_style, child_style) do
+    child_style.background_color == parent_style.background_color and
+      child_style.foreground_color == parent_style.foreground_color and
+      child_style.bold == parent_style.bold and
+      child_style.italic == parent_style.italic and
+      child_style.reverse == parent_style.reverse
+  end
+
+  defp single_relative_child_box([%{position: position} = child])
+       when position != :absolute and position != :fixed,
+       do: child
+
+  defp single_relative_child_box(_children), do: nil
+
   defp plain_wrapper_style?(%{
          content: "",
          position: :relative,
@@ -2332,6 +2787,33 @@ defmodule BackBreeze.Box do
   end
 
   defp plain_wrapper_style?(_box), do: false
+
+  defp plain_hidden_wrapper_style?(%{
+         content: "",
+         position: :relative,
+         left: nil,
+         top: nil,
+         style: %BackBreeze.Style{
+           bold: false,
+           italic: false,
+           padding: 0,
+           padding_top: nil,
+           padding_right: nil,
+           padding_bottom: nil,
+           padding_left: nil,
+           reverse: false,
+           border: border,
+           overflow: :hidden,
+           scrollbar: false,
+           border_color: nil,
+           foreground_color: nil,
+           background_color: nil
+         }
+       }) do
+    border == BackBreeze.Border.none()
+  end
+
+  defp plain_hidden_wrapper_style?(_box), do: false
 
   defp visual_overflow?(%{overflow: :hidden}, _content_height, _height), do: false
   defp visual_overflow?(_style, content_height, height), do: content_height > max(height || 0, 0)
