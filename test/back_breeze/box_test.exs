@@ -610,6 +610,30 @@ defmodule BackBreeze.BoxTest do
       assert rendered.height == 2
     end
 
+    test "auto-height grid includes parent top padding" do
+      button = fn label ->
+        BackBreeze.Box.new(
+          content: label,
+          style: %{width: 10, height: 1, padding_left: 1, padding_right: 1, overflow: :hidden}
+        )
+      end
+
+      box =
+        BackBreeze.Box.new(
+          display: %BackBreeze.Grid{columns: 3, gap_x: 1},
+          style: %{padding_top: 1},
+          children: [button.("Confirm"), button.("Cancel"), button.("Delete")]
+        )
+
+      rendered =
+        BackBreeze.Box.render(box, terminal: %Termite.Terminal{size: %{width: 80, height: 24}})
+
+      assert rendered.height == 2
+      assert rendered.content =~ " Confirm "
+      assert rendered.content =~ " Cancel "
+      assert rendered.content =~ " Delete "
+    end
+
     test "supports inset-constrained fixed screen overlays" do
       child =
         BackBreeze.Box.new(

@@ -301,7 +301,12 @@ defmodule BackBreeze.Box do
       end)
 
     structured? = Keyword.get(opts, :structured, false)
-    children_content_height = content_height(children, box.display)
+
+    children_content_height =
+      case box.display do
+        %BackBreeze.Grid{} -> max(content_height(children, box.display), child_height)
+        _ -> content_height(children, box.display)
+      end
 
     overlay_only_children? =
       children != [] and Enum.all?(children, &(&1.position == :absolute or &1.overlay?))
