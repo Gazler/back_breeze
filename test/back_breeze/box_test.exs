@@ -1244,6 +1244,28 @@ defmodule BackBreeze.BoxTest do
                Lines\
                """
     end
+
+    test "joins single-line items with viewport slicing" do
+      items = ["One", "Two", "Three"]
+      {content, 5, 3} = BackBreeze.Box.join_vertical(items, height: 2, scroll: {1, 0})
+
+      assert content ==
+               """
+               Two
+               Three\
+               """
+    end
+
+    test "reports total multiline height when viewport slicing" do
+      items = ["One", "Two\nLines", "Three"]
+      {content, 5, 4} = BackBreeze.Box.join_vertical(items, height: 2, scroll: {1, 0})
+
+      assert content ==
+               """
+               Two
+               Lines\
+               """
+    end
   end
 
   describe "width: :full" do
@@ -1287,6 +1309,12 @@ defmodule BackBreeze.BoxTest do
   end
 
   describe "join_horizontal/2" do
+    test "joins single-line items without multiline padding" do
+      {content, 11, 0} = BackBreeze.Box.join_horizontal(["One", "Two", "Three"])
+
+      assert content == "OneTwoThree"
+    end
+
     test "joins items with padding" do
       items = ["One line", "Two\nLines", "Three\n+\n+\nLines"]
       {content, 18, 3} = BackBreeze.Box.join_horizontal(items)

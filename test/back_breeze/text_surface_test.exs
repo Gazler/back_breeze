@@ -24,6 +24,53 @@ defmodule BackBreeze.TextSurfaceTest do
              """
   end
 
+  test "text span foreground overrides inherited foreground" do
+    content = [
+      TextSpan.new("Icon", %{foreground_color: {154, 103, 174}}),
+      TextSpan.new(" Text")
+    ]
+
+    output =
+      BackBreeze.Style.render(%BackBreeze.Style{foreground_color: {235, 219, 178}}, content)
+
+    assert output ==
+             "\e[38;2;154;103;174mIcon\e[0m\e[38;2;235;219;178m Text\e[0m"
+  end
+
+  test "structured virtual text span foreground overrides inherited foreground" do
+    content =
+      VirtualText.lazy(
+        cache_key: {:structured_span_color_fixture, make_ref()},
+        cache?: false,
+        intrinsic_width: 9,
+        line_count_fn: fn _width -> 1 end,
+        slice_fn: fn _start_line, _count, _width ->
+          [[{"Icon", %{foreground_color: {154, 103, 174}}}, {" Text", %{}}]]
+        end
+      )
+
+    style = %BackBreeze.Style{
+      foreground_color: {235, 219, 178},
+      width: 9,
+      height: 1,
+      overflow: :hidden,
+      scrollbar: true
+    }
+
+    {_content, dimensions} =
+      BackBreeze.Style.calculate_and_render(style, content, structured: true)
+
+    output =
+      BackBreeze.Box.layer_map_to_content(
+        dimensions.layer_map,
+        dimensions.rendered_width,
+        dimensions.height
+      )
+
+    assert output ==
+             "\e[38;2;154;103;174mIcon\e[0m\e[38;2;235;219;178m Text\e[0m"
+  end
+
   test "supports deep viewport slicing for text spans" do
     content =
       1..200

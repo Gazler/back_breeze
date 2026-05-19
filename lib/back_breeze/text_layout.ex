@@ -166,6 +166,32 @@ defmodule BackBreeze.TextLayout do
     end)
   end
 
+  @doc false
+  def merge_styles(base_style, style) do
+    Enum.reduce(style, base_style, fn
+      {_key, nil}, acc ->
+        acc
+
+      {:bold, true}, acc ->
+        Termite.Style.bold(acc)
+
+      {:italic, true}, acc ->
+        Termite.Style.italic(acc)
+
+      {:reverse, true}, acc ->
+        Termite.Style.reverse(acc)
+
+      {:foreground_color, color}, acc ->
+        acc |> remove_style(:foreground) |> Termite.Style.foreground(color)
+
+      {:background_color, color}, acc ->
+        acc |> remove_style(:background) |> Termite.Style.background(color)
+
+      _, acc ->
+        acc
+    end)
+  end
+
   def line_width(line) when is_binary(line), do: string_length(line)
 
   def line_width(segments) when is_list(segments) do
@@ -263,16 +289,8 @@ defmodule BackBreeze.TextLayout do
     end)
   end
 
-  defp merge_styles(base_style, style) do
-    Enum.reduce(style, base_style, fn
-      {_key, nil}, acc -> acc
-      {:bold, true}, acc -> Termite.Style.bold(acc)
-      {:italic, true}, acc -> Termite.Style.italic(acc)
-      {:reverse, true}, acc -> Termite.Style.reverse(acc)
-      {:foreground_color, color}, acc -> Termite.Style.foreground(acc, color)
-      {:background_color, color}, acc -> Termite.Style.background(acc, color)
-      _, acc -> acc
-    end)
+  defp remove_style(%Termite.Style{styles: styles} = style, key) do
+    %{style | styles: Enum.reject(styles, &match?({^key, _}, &1))}
   end
 
   defp content_height([]), do: 0

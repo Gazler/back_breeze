@@ -204,6 +204,12 @@ defmodule BackBreeze.Scrollbar do
 
   @spec thumb_size(t(), non_neg_integer(), non_neg_integer()) :: non_neg_integer()
   def thumb_size(%__MODULE__{} = config, track_size, content_size) do
+    thumb_size(config, track_size, track_size, content_size)
+  end
+
+  @spec thumb_size(t(), non_neg_integer(), non_neg_integer(), non_neg_integer()) ::
+          non_neg_integer()
+  def thumb_size(%__MODULE__{} = config, track_size, viewport_size, content_size) do
     case config.sizing do
       {:fixed, size} ->
         min(max(size, 1), max(track_size, 1))
@@ -211,7 +217,7 @@ defmodule BackBreeze.Scrollbar do
       _ ->
         max(
           min(
-            round(track_size * max(track_size, 1) / max(content_size, 1)),
+            round(track_size * max(viewport_size, 1) / max(content_size, 1)),
             track_size
           ),
           min(config.min_thumb_size, max(track_size, 1))
@@ -613,6 +619,7 @@ defmodule BackBreeze.Scrollbar do
       thumb_size(
         axis_context.config,
         track_size,
+        axis_context.viewport_size,
         max(axis_context.content_size, axis_context.viewport_size)
       )
 

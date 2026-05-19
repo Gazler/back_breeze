@@ -10,6 +10,7 @@ defmodule BackBreeze.Grid do
   """
   alias BackBreeze.BenchProfile
   alias BackBreeze.RenderCache
+  alias BackBreeze.VirtualText
 
   @doc """
   Create a grid with the specified number of columns.
@@ -89,15 +90,28 @@ defmodule BackBreeze.Grid do
     terminal = Keyword.get(opts, :terminal)
 
     RenderCache.with_frame(fn ->
-      RenderCache.fetch_stable(
-        {:grid_render_with_dimensions, structured?, if(terminal, do: terminal.size, else: nil),
-         items, grid, style},
-        fn ->
-          do_render_with_dimensions(items, grid, style, opts, structured?)
-        end
-      )
+      if cacheable_items?(items) do
+        RenderCache.fetch_stable(
+          {:grid_render_with_dimensions, structured?, if(terminal, do: terminal.size, else: nil),
+           items, grid, style},
+          fn ->
+            do_render_with_dimensions(items, grid, style, opts, structured?)
+          end
+        )
+      else
+        do_render_with_dimensions(items, grid, style, opts, structured?)
+      end
     end)
   end
+
+  defp cacheable_items?(items) when is_list(items), do: Enum.all?(items, &cacheable_item?/1)
+
+  defp cacheable_item?(%{content: %VirtualText{cache?: false}}), do: false
+
+  defp cacheable_item?(%{children: children}) when is_list(children),
+    do: Enum.all?(children, &cacheable_item?/1)
+
+  defp cacheable_item?(_item), do: true
 
   defp do_render_with_dimensions(items, grid, style, opts, structured?) do
     if simple_vertical_grid?(grid) do
@@ -258,25 +272,14 @@ defmodule BackBreeze.Grid do
         cond do
           simple_row_or_column? and grid.columns == 1 and gap_y == 0 and
               not use_structured_simple_compose? ->
-            rows_with_results
-            |> Enum.map(fn
-              [%{result: %{box: item_box}}] ->
-                materialized_content(item_box)
-
-              row ->
-                Enum.map_join(row, "\n", fn %{result: %{box: item_box}} ->
-                  materialized_content(item_box)
-                end)
-            end)
-            |> BackBreeze.Box.join_vertical(height: total_height)
+            rendered_children
+            |> join_rendered_column(total_height)
             |> then(fn {content, width, height} -> {content, width, height, %{}} end)
 
           simple_row_or_column? and row_count == 1 and gap_x == 0 and
               not use_structured_simple_compose? ->
-            rows_with_results
-            |> List.flatten()
-            |> Enum.map(fn %{result: %{box: item_box}} -> materialized_content(item_box) end)
-            |> BackBreeze.Box.join_horizontal()
+            rendered_children
+            |> join_rendered_row()
             |> then(fn {content, width, height} -> {content, width, height, %{}} end)
 
           simple_row_or_column? and row_count == 1 ->
@@ -443,8 +446,7 @@ defmodule BackBreeze.Grid do
         cond do
           simple_column? and not use_structured_simple_compose? ->
             rendered_children
-            |> Enum.map(&materialized_content/1)
-            |> BackBreeze.Box.join_vertical(height: total_height)
+            |> join_rendered_column(total_height)
             |> then(fn {content, width, height} -> {content, width, height, %{}} end)
 
           true ->
@@ -673,6 +675,66 @@ defmodule BackBreeze.Grid do
         false
     end)
   end
+
+  defp join_rendered_column(children, total_height) do
+    content = Enum.map_join(children, "\n", &materialized_content/1)
+    width = Enum.reduce(children, 0, fn child, acc -> max(acc, rendered_width(child)) end)
+    height = Enum.reduce(children, 0, fn child, acc -> acc + rendered_height(child) end)
+
+    {content, width, min(height, total_height)}
+  end
+
+  defp join_rendered_row(children) do
+    child_rows =
+      Enum.map(children, fn child ->
+        {rendered_width(child), rendered_height(child), content_rows(child)}
+      end)
+
+    width =
+      Enum.reduce(child_rows, 0, fn {child_width, _height, _rows}, acc -> acc + child_width end)
+
+    height =
+      Enum.reduce(child_rows, 0, fn {_width, child_height, _rows}, acc ->
+        max(acc, child_height)
+      end)
+
+    rows =
+      if height == 0 do
+        []
+      else
+        Enum.map(0..(height - 1), fn row_index ->
+          Enum.map(child_rows, fn {child_width, _child_height, rows} ->
+            row_at(rows, row_index) || String.duplicate(" ", child_width)
+          end)
+        end)
+      end
+
+    {IO.iodata_to_binary(Enum.intersperse(rows, "\n")), width, height}
+  end
+
+  defp content_rows(%{content: content}) when is_binary(content),
+    do: :binary.split(content, "\n", [:global])
+
+  defp content_rows(child), do: child |> materialized_content() |> :binary.split("\n", [:global])
+
+  defp row_at(rows, index) when is_list(rows), do: Enum.at(rows, index)
+
+  defp rendered_width(%{width: width}) when is_integer(width), do: max(width, 0)
+
+  defp rendered_width(%{content: content}) when is_binary(content),
+    do: BackBreeze.Utils.string_length(content)
+
+  defp rendered_width(_child), do: 0
+
+  defp rendered_height(%{height: height}) when is_integer(height), do: max(height, 0)
+
+  defp rendered_height(%{content: content}) when is_binary(content) do
+    content
+    |> :binary.split("\n", [:global])
+    |> length()
+  end
+
+  defp rendered_height(_child), do: 0
 
   defp materialized_content(%{content: content}) when is_binary(content), do: content
 

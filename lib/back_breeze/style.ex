@@ -4,7 +4,11 @@ defmodule BackBreeze.Style do
   """
   alias __MODULE__
   alias BackBreeze.TextLayout
+  alias BackBreeze.Ucwidth
   alias BackBreeze.VirtualText
+
+  @wide_glyph_key :__wide_glyphs__
+  @default_fill_key :__default_fill__
 
   defstruct bold: false,
             italic: false,
@@ -189,6 +193,7 @@ defmodule BackBreeze.Style do
     {border, style} = Map.pop(style, :border)
     {text_align, style} = Map.pop(style, :text_align, :left)
     {overflow, style} = Map.pop(style, :overflow)
+    {scrollbar, style} = Map.pop(style, :scrollbar, false)
     {repeat_x, style} = Map.pop(style, :repeat_x, false)
     {repeat_y, style} = Map.pop(style, :repeat_y, false)
     {padding, style} = Map.pop(style, :padding, 0)
@@ -234,7 +239,17 @@ defmodule BackBreeze.Style do
         do: max(height - border_height - padding_top - padding_bottom, 0),
         else: height
 
-    windowed_hidden? = windowed_hidden_render?(overflow, height, repeat_x, repeat_y, auto_width)
+    render_context = %{
+      width: width,
+      height: height,
+      overflow: overflow,
+      repeat_x: repeat_x,
+      repeat_y: repeat_y,
+      auto_width?: auto_width,
+      string_length: string_length
+    }
+
+    windowed_hidden? = windowed_hidden_render?(render_context)
 
     termite_style = to_termite(style)
 
@@ -250,7 +265,7 @@ defmodule BackBreeze.Style do
         {slice_visible_lines(prepared, Keyword.get(opts, :offset_top, 0), height),
          prepared.line_count}
       else
-        cached_render_lines(source, width, height, overflow, repeat_x, repeat_y, string_length)
+        cached_render_lines(source, render_context)
       end
 
     original_height = height
@@ -269,50 +284,69 @@ defmodule BackBreeze.Style do
         Enum.slice(lines, start_pos..end_pos//1)
       end
 
-    rendered_rows =
-      Enum.map(lines, fn line ->
-        string_length = TextLayout.line_width(line)
-        string_padding = if width > string_length, do: width - string_length, else: 0
-        {left_padding, right_padding} = horizontal_padding(text_align, string_padding)
-
-        BackBreeze.Border.render_left(border) <>
-          render_styled_row(
-            termite_style,
-            line,
-            padding_left + left_padding,
-            right_padding + padding_right
-          ) <>
-          BackBreeze.Border.render_right(border)
-      end)
-
-    inner_width = padding_left + width + padding_right
-
-    top_padding_rows = blank_rows(padding_top, border, termite_style, inner_width)
-
-    bottom_padding_rows = blank_rows(padding_bottom, border, termite_style, inner_width)
-
     line_count = length(lines)
+    inner_width = padding_left + width + padding_right
+    padding_row_count = max(height - line_count, 0)
 
-    padding_rows =
-      case height - line_count do
-        remaining when remaining > 0 ->
-          blank_rows(remaining, border, termite_style, inner_width)
+    layer_map =
+      maybe_styled_layer_map(%{
+        source: source,
+        scrollbar: scrollbar,
+        overflow: overflow,
+        repeat_x: repeat_x,
+        repeat_y: repeat_y,
+        auto_width?: auto_width,
+        lines: lines,
+        border: border,
+        termite_style: termite_style,
+        text_align: text_align,
+        width: width,
+        inner_width: inner_width,
+        padding_top: padding_top,
+        padding_right: padding_right,
+        padding_bottom: padding_bottom,
+        padding_left: padding_left,
+        padding_row_count: padding_row_count
+      })
 
-        _ ->
+    structured? = Keyword.get(opts, :structured, false)
+
+    {content, height} =
+      if structured? and is_map(layer_map) do
+        {nil,
+         rendered_row_count(border, padding_top + line_count + padding_bottom + padding_row_count)}
+      else
+        rendered_rows =
+          Enum.map(lines, fn line ->
+            string_length = TextLayout.line_width(line)
+            string_padding = if width > string_length, do: width - string_length, else: 0
+            {left_padding, right_padding} = horizontal_padding(text_align, string_padding)
+
+            BackBreeze.Border.render_left(border) <>
+              render_styled_row(
+                termite_style,
+                line,
+                padding_left + left_padding,
+                right_padding + padding_right
+              ) <>
+              BackBreeze.Border.render_right(border)
+          end)
+
+        top_padding_rows = blank_rows(padding_top, border, termite_style, inner_width)
+        bottom_padding_rows = blank_rows(padding_bottom, border, termite_style, inner_width)
+        padding_rows = blank_rows(padding_row_count, border, termite_style, inner_width)
+
+        rows =
           []
+          |> maybe_append_row(BackBreeze.Border.render_top(border, inner_width))
+          |> Kernel.++(top_padding_rows)
+          |> Kernel.++(rendered_rows)
+          |> Kernel.++(bottom_padding_rows)
+          |> Kernel.++(padding_rows)
+          |> maybe_append_row(BackBreeze.Border.render_bottom(border, inner_width))
+
+        {Enum.join(rows, "\n"), length(rows)}
       end
-
-    rows =
-      []
-      |> maybe_append_row(BackBreeze.Border.render_top(border, inner_width))
-      |> Kernel.++(top_padding_rows)
-      |> Kernel.++(rendered_rows)
-      |> Kernel.++(bottom_padding_rows)
-      |> Kernel.++(padding_rows)
-      |> maybe_append_row(BackBreeze.Border.render_bottom(border, inner_width))
-
-    content = Enum.join(rows, "\n")
-    height = length(rows)
 
     viewport_height =
       if original_height == 0 do
@@ -321,7 +355,30 @@ defmodule BackBreeze.Style do
         min(original_height, content_height)
       end
 
-    {content, %{height: height, viewport_height: viewport_height, content_height: content_height}}
+    rendered_width =
+      if(border.left, do: 1, else: 0) + inner_width + if border.right, do: 1, else: 0
+
+    dimensions = %{
+      height: height,
+      viewport_height: viewport_height,
+      content_height: content_height
+    }
+
+    dimensions =
+      if is_map(layer_map) do
+        Map.put(dimensions, :layer_map, layer_map)
+      else
+        dimensions
+      end
+
+    dimensions =
+      if is_nil(content) do
+        Map.put(dimensions, :rendered_width, rendered_width)
+      else
+        dimensions
+      end
+
+    {content, dimensions}
   end
 
   defp cached_source_metrics(str) when is_binary(str) do
@@ -336,20 +393,26 @@ defmodule BackBreeze.Style do
     end)
   end
 
+  defp cached_source_metrics(%VirtualText{cache?: false} = content) do
+    TextLayout.source_metrics(content)
+  end
+
   defp cached_source_metrics(%VirtualText{} = content) do
     BackBreeze.RenderCache.fetch_stable({__MODULE__, :source_metrics, content.cache_key}, fn ->
       TextLayout.source_metrics(content)
     end)
   end
 
-  defp cached_render_lines(str, width, height, overflow, repeat_x, repeat_y, string_length)
-       when is_binary(str) do
+  defp cached_render_lines(str, context) when is_binary(str) do
+    %{width: width, height: height, overflow: overflow} = context
+
     BackBreeze.RenderCache.fetch_stable(
-      {__MODULE__, :render_lines, str, width, height, overflow, repeat_x, repeat_y},
+      {__MODULE__, :render_lines, str, width, height, overflow, context.repeat_x,
+       context.repeat_y},
       fn ->
         str =
           cond do
-            string_length <= width -> str
+            context.string_length <= width -> str
             overflow == :hidden && height == 0 -> BackBreeze.String.truncate(str, width)
             true -> BackBreeze.String.reflow(str, width)
           end
@@ -359,8 +422,8 @@ defmodule BackBreeze.Style do
             [""] -> []
             other -> other
           end
-          |> maybe_repeat_x(width, repeat_x)
-          |> maybe_repeat_y(height, repeat_y)
+          |> maybe_repeat_x(width, context.repeat_x)
+          |> maybe_repeat_y(height, context.repeat_y)
 
         content_height = if List.last(lines) == "", do: length(lines) - 1, else: length(lines)
         {lines, content_height}
@@ -368,10 +431,12 @@ defmodule BackBreeze.Style do
     )
   end
 
-  defp cached_render_lines(content, width, height, overflow, repeat_x, repeat_y, _string_length)
-       when is_list(content) do
+  defp cached_render_lines(content, context) when is_list(content) do
+    %{width: width, height: height, overflow: overflow} = context
+
     BackBreeze.RenderCache.fetch_stable(
-      {__MODULE__, :render_lines, content, width, height, overflow, repeat_x, repeat_y},
+      {__MODULE__, :render_lines, content, width, height, overflow, context.repeat_x,
+       context.repeat_y},
       fn ->
         prepared = TextLayout.prepare(content, width, overflow, height)
         lines = TextLayout.visible_lines(prepared, 0, prepared.raw_line_count)
@@ -380,17 +445,19 @@ defmodule BackBreeze.Style do
     )
   end
 
-  defp cached_render_lines(
-         %VirtualText{} = content,
-         width,
-         height,
-         overflow,
-         repeat_x,
-         repeat_y,
-         _string_length
-       ) do
+  defp cached_render_lines(%VirtualText{} = content, context) when content.cache? == false do
+    %{width: width, height: height, overflow: overflow} = context
+    prepared = TextLayout.prepare(content, width, overflow, height)
+    lines = TextLayout.visible_lines(prepared, 0, prepared.raw_line_count)
+    {lines, prepared.line_count}
+  end
+
+  defp cached_render_lines(%VirtualText{} = content, context) do
+    %{width: width, height: height, overflow: overflow} = context
+
     BackBreeze.RenderCache.fetch_stable(
-      {__MODULE__, :render_lines, content.cache_key, width, height, overflow, repeat_x, repeat_y},
+      {__MODULE__, :render_lines, content.cache_key, width, height, overflow, context.repeat_x,
+       context.repeat_y},
       fn ->
         prepared = TextLayout.prepare(content, width, overflow, height)
         lines = TextLayout.visible_lines(prepared, 0, prepared.raw_line_count)
@@ -405,6 +472,14 @@ defmodule BackBreeze.Style do
       {__MODULE__, :virtual_prepared_content, source, width, height, overflow},
       fn -> build_prepared_content(%VirtualText{content: source}, width, height, overflow) end
     )
+  end
+
+  defp prepared_content_entry(%VirtualText{cache?: false} = content, width, height, overflow) do
+    build_prepared_content(content, width, height, overflow)
+  end
+
+  defp prepared_content_entry(%VirtualText{content: nil} = content, width, height, overflow) do
+    build_prepared_content(content, width, height, overflow)
   end
 
   defp prepared_content_entry(%VirtualText{} = content, width, height, overflow) do
@@ -428,11 +503,17 @@ defmodule BackBreeze.Style do
     )
   end
 
-  defp windowed_hidden_render?(:hidden, height, false, false, false)
+  defp windowed_hidden_render?(%{
+         overflow: :hidden,
+         height: height,
+         repeat_x: false,
+         repeat_y: false,
+         auto_width?: false
+       })
        when is_integer(height) and height > 0,
        do: true
 
-  defp windowed_hidden_render?(_overflow, _height, _repeat_x, _repeat_y, _auto_width), do: false
+  defp windowed_hidden_render?(_context), do: false
 
   defp slice_visible_lines(
          %{content: content, line_offsets: offsets, line_count: total_lines},
@@ -496,6 +577,328 @@ defmodule BackBreeze.Style do
     :binary.part(content, start_offset, max(end_offset - start_offset, 0))
   end
 
+  defp maybe_styled_layer_map(
+         %{
+           source: %VirtualText{cache?: false},
+           scrollbar: scrollbar,
+           overflow: :hidden,
+           repeat_x: repeat_x,
+           repeat_y: repeat_y,
+           auto_width?: false,
+           width: width
+         } = context
+       )
+       when scrollbar not in [false, nil] and repeat_x in [false, nil] and
+              repeat_y in [false, nil] and is_integer(width) do
+    context =
+      context
+      |> Map.put(:border_seq, border_style_sequence(context.border))
+      |> Map.put(:base_seq, Termite.Style.open_code(context.termite_style))
+
+    state =
+      %{cells: %{}, y: 0, wide?: false}
+      |> maybe_put_top_border(context)
+      |> put_blank_layer_rows(context.padding_top, context)
+      |> put_content_layer_rows(context)
+      |> put_blank_layer_rows(context.padding_bottom + context.padding_row_count, context)
+      |> maybe_put_bottom_border(context)
+
+    max_x =
+      if(context.border.left, do: 1, else: 0) + context.inner_width +
+        if(context.border.right, do: 1, else: 0) - 1
+
+    max_y = state.y - 1
+
+    state.cells
+    |> maybe_mark_wide_glyph_metadata(state.wide?)
+    |> compact_full_surface_fill(max_x, max_y)
+  end
+
+  defp maybe_styled_layer_map(_context), do: nil
+
+  defp maybe_put_top_border(%{y: y} = state, %{border: %{top: nil}}),
+    do: %{state | y: y}
+
+  defp maybe_put_top_border(%{cells: cells, y: y, wide?: wide?} = state, context) do
+    border = context.border
+    seq = context.border_seq
+
+    {cells, _x, wide?} =
+      cells
+      |> put_optional_text(%{x: 0, y: y, text: border.top_left, seq: seq, wide?: wide?})
+      |> then(fn {acc, x, row_wide?} ->
+        put_repeated_text(acc, %{
+          x: x,
+          y: y,
+          text: border.top,
+          count: context.inner_width,
+          seq: seq,
+          wide?: row_wide?
+        })
+      end)
+      |> then(fn {acc, x, row_wide?} ->
+        put_optional_text(acc, %{
+          x: x,
+          y: y,
+          text: border.top_right,
+          seq: seq,
+          wide?: row_wide?
+        })
+      end)
+
+    %{state | cells: cells, y: y + 1, wide?: wide?}
+  end
+
+  defp maybe_put_bottom_border(%{y: y} = state, %{border: %{bottom: nil}}),
+    do: %{state | y: y}
+
+  defp maybe_put_bottom_border(%{cells: cells, y: y, wide?: wide?} = state, context) do
+    border = context.border
+    seq = context.border_seq
+
+    {cells, _x, wide?} =
+      cells
+      |> put_optional_text(%{x: 0, y: y, text: border.bottom_left, seq: seq, wide?: wide?})
+      |> then(fn {acc, x, row_wide?} ->
+        put_repeated_text(acc, %{
+          x: x,
+          y: y,
+          text: border.bottom,
+          count: context.inner_width,
+          seq: seq,
+          wide?: row_wide?
+        })
+      end)
+      |> then(fn {acc, x, row_wide?} ->
+        put_optional_text(acc, %{
+          x: x,
+          y: y,
+          text: border.bottom_right,
+          seq: seq,
+          wide?: row_wide?
+        })
+      end)
+
+    %{state | cells: cells, y: y + 1, wide?: wide?}
+  end
+
+  defp put_blank_layer_rows(state, count, _context) when count <= 0, do: state
+
+  defp put_blank_layer_rows(state, count, context) do
+    Enum.reduce(1..count, state, fn _row, acc ->
+      put_layer_row(acc, context, %{
+        line: [],
+        left_padding: context.inner_width,
+        right_padding: 0
+      })
+    end)
+  end
+
+  defp put_content_layer_rows(state, %{lines: []}), do: state
+
+  defp put_content_layer_rows(state, context) do
+    Enum.reduce(context.lines, state, fn line, acc ->
+      string_length = TextLayout.line_width(line)
+
+      string_padding =
+        if context.width > string_length, do: context.width - string_length, else: 0
+
+      {left_padding, right_padding} = horizontal_padding(context.text_align, string_padding)
+
+      put_layer_row(acc, context, %{
+        line: line,
+        left_padding: context.padding_left + left_padding,
+        right_padding: right_padding + context.padding_right
+      })
+    end)
+  end
+
+  defp put_layer_row(%{cells: cells, y: y, wide?: wide?} = state, context, row) do
+    {cells, x, wide?} =
+      put_optional_text(cells, %{
+        x: 0,
+        y: y,
+        text: context.border.left,
+        seq: context.border_seq,
+        wide?: wide?
+      })
+
+    {cells, x, wide?} =
+      put_repeated_text(cells, %{
+        x: x,
+        y: y,
+        text: " ",
+        count: row.left_padding,
+        seq: context.base_seq,
+        wide?: wide?
+      })
+
+    {cells, x, wide?} =
+      put_layer_line(cells, %{x: x, y: y, line: row.line, wide?: wide?}, context)
+
+    {cells, x, wide?} =
+      put_repeated_text(cells, %{
+        x: x,
+        y: y,
+        text: " ",
+        count: row.right_padding,
+        seq: context.base_seq,
+        wide?: wide?
+      })
+
+    {cells, _x, wide?} =
+      put_optional_text(cells, %{
+        x: x,
+        y: y,
+        text: context.border.right,
+        seq: context.border_seq,
+        wide?: wide?
+      })
+
+    %{state | cells: cells, y: y + 1, wide?: wide?}
+  end
+
+  defp put_layer_line(cells, %{x: x, line: "", wide?: wide?}, _context),
+    do: {cells, x, wide?}
+
+  defp put_layer_line(cells, %{x: x, y: y, line: line, wide?: wide?}, context)
+       when is_binary(line),
+       do: put_text_cells(cells, x, y, line, context.base_seq, wide?)
+
+  defp put_layer_line(cells, %{x: x, y: y, line: line, wide?: wide?}, context)
+       when is_list(line) do
+    Enum.reduce(line, {cells, x, wide?}, fn {text, style}, {acc, cell_x, cell_wide?} ->
+      put_text_cells(
+        acc,
+        cell_x,
+        y,
+        text,
+        merged_style_sequence(context.termite_style, style),
+        cell_wide?
+      )
+    end)
+  end
+
+  defp put_optional_text(cells, %{x: x, text: nil, wide?: wide?}), do: {cells, x, wide?}
+  defp put_optional_text(cells, %{x: x, text: "", wide?: wide?}), do: {cells, x, wide?}
+
+  defp put_optional_text(cells, %{x: x, y: y, text: text, seq: seq, wide?: wide?}),
+    do: put_text_cells(cells, x, y, text, seq, wide?)
+
+  defp put_repeated_text(cells, %{x: x, count: count, wide?: wide?}) when count <= 0,
+    do: {cells, x, wide?}
+
+  defp put_repeated_text(cells, %{x: x, y: y, text: text, count: count, seq: seq, wide?: wide?}) do
+    Enum.reduce(1..count, {cells, x, wide?}, fn _i, {acc, cell_x, cell_wide?} ->
+      put_text_cells(acc, cell_x, y, text, seq, cell_wide?)
+    end)
+  end
+
+  defp put_text_cells(map, x, _y, "", _seq, wide?), do: {map, x, wide?}
+
+  defp put_text_cells(map, x, y, <<" ", rest::binary>>, "", wide?) do
+    put_text_cells(map, x + 1, y, rest, "", wide?)
+  end
+
+  defp put_text_cells(map, x, y, <<char, rest::binary>>, seq, wide?) when char < 128 do
+    put_text_cells(Map.put(map, {y, x}, {<<char>>, seq}), x + 1, y, rest, seq, wide?)
+  end
+
+  defp put_text_cells(map, x, y, <<codepoint::utf8, rest::binary>>, seq, wide?) do
+    width = Ucwidth.width_codepoint(codepoint)
+
+    put_text_cells(
+      Map.put(map, {y, x}, {<<codepoint::utf8>>, seq}),
+      x + width,
+      y,
+      rest,
+      seq,
+      wide? or width > 1
+    )
+  end
+
+  defp merged_style_sequence(base_style, style) do
+    base_style
+    |> TextLayout.merge_styles(style)
+    |> Termite.Style.open_code()
+  end
+
+  defp border_style_sequence(border) do
+    []
+    |> maybe_add_color(Map.get(border, :color), &Termite.Style.foreground/2)
+    |> maybe_add_color(Map.get(border, :background_color), &Termite.Style.background/2)
+    |> case do
+      [] ->
+        ""
+
+      funs ->
+        funs
+        |> Enum.reduce(Termite.Style.ansi256(), fn fun, style -> fun.(style) end)
+        |> Termite.Style.open_code()
+    end
+  end
+
+  defp maybe_add_color(funs, nil, _fun), do: funs
+  defp maybe_add_color(funs, value, fun), do: [fn style -> fun.(style, value) end | funs]
+
+  defp maybe_mark_wide_glyph_metadata(map, true) when map_size(map) > 0,
+    do: Map.put(map, @wide_glyph_key, true)
+
+  defp maybe_mark_wide_glyph_metadata(map, _value), do: Map.delete(map, @wide_glyph_key)
+
+  defp compact_full_surface_fill(layer_map, max_x, max_y)
+       when max_x >= 0 and max_y >= 0 and map_size(layer_map) > 0 do
+    area = (max_x + 1) * (max_y + 1)
+    explicit_count = map_size(layer_map) - layer_map_metadata_count(layer_map)
+
+    cond do
+      area < 512 ->
+        layer_map
+
+      Map.has_key?(layer_map, @default_fill_key) ->
+        layer_map
+
+      explicit_count != area ->
+        layer_map
+
+      true ->
+        case dominant_fill_point(layer_map, area) do
+          nil ->
+            layer_map
+
+          point ->
+            layer_map
+            |> Enum.reduce(%{}, fn
+              {{_y, _x}, ^point}, acc -> acc
+              {key, value}, acc -> Map.put(acc, key, value)
+            end)
+            |> Map.put(@default_fill_key, [{point, 0, 0, max_x, max_y}])
+        end
+    end
+  end
+
+  defp compact_full_surface_fill(layer_map, _max_x, _max_y), do: layer_map
+
+  defp dominant_fill_point(layer_map, area) do
+    threshold = div(area * 4, 5)
+
+    layer_map
+    |> Enum.reduce(%{}, fn
+      {{_y, _x}, point}, acc -> Map.update(acc, point, 1, &(&1 + 1))
+      _, acc -> acc
+    end)
+    |> Enum.max_by(fn {_point, count} -> count end, fn -> nil end)
+    |> case do
+      {point, count} when count >= threshold -> point
+      _ -> nil
+    end
+  end
+
+  defp layer_map_metadata_count(layer_map) do
+    if(Map.has_key?(layer_map, @wide_glyph_key), do: 1, else: 0) +
+      if(Map.has_key?(layer_map, @default_fill_key), do: 1, else: 0)
+  end
+
   defp source_content(%VirtualText{} = content), do: content
   defp source_content(content) when is_list(content), do: content
   defp source_content(content) when is_binary(content), do: content
@@ -515,6 +918,10 @@ defmodule BackBreeze.Style do
   defp maybe_append_row(rows, ""), do: rows
   defp maybe_append_row(rows, nil), do: rows
   defp maybe_append_row(rows, row), do: rows ++ [String.trim_trailing(row, "\n")]
+
+  defp rendered_row_count(border, inner_rows) do
+    inner_rows + if(border.top, do: 1, else: 0) + if(border.bottom, do: 1, else: 0)
+  end
 
   defp blank_rows(count, _border, _termite_style, _inner_width) when count <= 0, do: []
 

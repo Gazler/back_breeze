@@ -90,19 +90,26 @@ defmodule BackBreeze.Box do
     terminal = Keyword.get(opts, :terminal)
 
     RenderCache.with_frame(fn ->
-      RenderCache.fetch_stable(
-        {:render_with_dimensions, if(terminal, do: terminal.size, else: nil), box_cache_key(box)},
-        fn ->
-          %{box: box, dimensions: dimensions} =
-            render_and_calc(%{box: box, dimensions: [], id: 0}, opts)
-
-          dimensions = Enum.sort(dimensions) |> Enum.map(&elem(&1, 1))
-          box = ensure_rendered_content(box)
-          %{box: box, dimensions: dimensions}
-        end
-      )
+      if cacheable_box?(box) do
+        RenderCache.fetch_stable(
+          {:render_with_dimensions, if(terminal, do: terminal.size, else: nil),
+           box_cache_key(box)},
+          fn -> do_render_with_dimensions(box, opts) end
+        )
+      else
+        do_render_with_dimensions(box, opts)
+      end
       |> maybe_flatten_rendered_box(opts)
     end)
+  end
+
+  defp do_render_with_dimensions(box, opts) do
+    %{box: box, dimensions: dimensions} =
+      render_and_calc(%{box: box, dimensions: [], id: 0}, opts)
+
+    dimensions = Enum.sort(dimensions) |> Enum.map(&elem(&1, 1))
+    box = ensure_rendered_content(box)
+    %{box: box, dimensions: dimensions}
   end
 
   @doc false
@@ -110,20 +117,26 @@ defmodule BackBreeze.Box do
     terminal = Keyword.get(opts, :terminal)
 
     RenderCache.with_frame(fn ->
-      RenderCache.fetch_stable(
-        {:render_structured_with_dimensions, if(terminal, do: terminal.size, else: nil),
-         box_cache_key(box)},
-        fn ->
-          %{box: box, dimensions: dimensions} =
-            render_and_calc(
-              %{box: box, dimensions: [], id: 0},
-              Keyword.put(opts, :structured, true)
-            )
-
-          %{box: box, dimensions: Enum.sort(dimensions) |> Enum.map(&elem(&1, 1))}
-        end
-      )
+      if cacheable_box?(box) do
+        RenderCache.fetch_stable(
+          {:render_structured_with_dimensions, if(terminal, do: terminal.size, else: nil),
+           box_cache_key(box)},
+          fn -> do_render_structured_with_dimensions(box, opts) end
+        )
+      else
+        do_render_structured_with_dimensions(box, opts)
+      end
     end)
+  end
+
+  defp do_render_structured_with_dimensions(box, opts) do
+    %{box: box, dimensions: dimensions} =
+      render_and_calc(
+        %{box: box, dimensions: [], id: 0},
+        Keyword.put(opts, :structured, true)
+      )
+
+    %{box: box, dimensions: Enum.sort(dimensions) |> Enum.map(&elem(&1, 1))}
   end
 
   @doc false
@@ -131,17 +144,48 @@ defmodule BackBreeze.Box do
     structured? = Keyword.get(opts, :structured, false)
     terminal = Keyword.get(opts, :terminal)
 
-    RenderCache.fetch_stable(
-      {:render_box, structured?, if(terminal, do: terminal.size, else: nil), box_cache_key(box)},
-      fn ->
-        if structured? do
-          render_structured_with_dimensions(box, Keyword.delete(opts, :structured))
-        else
-          render_with_dimensions(box, opts)
+    if cacheable_box?(box) do
+      RenderCache.fetch_stable(
+        {:render_box, structured?, if(terminal, do: terminal.size, else: nil),
+         box_cache_key(box)},
+        fn ->
+          if structured? do
+            render_structured_with_dimensions(box, Keyword.delete(opts, :structured))
+          else
+            render_with_dimensions(box, opts)
+          end
         end
+      )
+    else
+      if structured? do
+        render_structured_with_dimensions(box, Keyword.delete(opts, :structured))
+      else
+        render_with_dimensions(box, opts)
       end
-    )
+    end
     |> maybe_flatten_rendered_box(opts)
+  end
+
+  defp cacheable_box?(%{content: %VirtualText{cache?: false}}), do: false
+
+  defp cacheable_box?(%{children: children}) when is_list(children) do
+    Enum.all?(children, &cacheable_box?/1)
+  end
+
+  defp cacheable_box?(_box), do: true
+
+  defp cached_or_generate_layer_map(%{content: %VirtualText{cache?: false}}, content) do
+    generate_layer_map(content, %{}, 0, 0)
+  end
+
+  defp cached_or_generate_layer_map(_box, content), do: cached_generate_layer_map(content)
+
+  defp cached_or_layer_maps_to_content(box, layer_map, overlay_layer_map, bounds) do
+    if cacheable_box?(box) do
+      cached_layer_maps_to_content(layer_map, overlay_layer_map, bounds)
+    else
+      layer_maps_to_content(layer_map, overlay_layer_map, bounds)
+    end
   end
 
   @doc false
@@ -228,6 +272,8 @@ defmodule BackBreeze.Box do
     {content, dimensions, width} =
       BenchProfile.measure({__MODULE__, :render_self}, fn -> render_self(box, opts) end)
 
+    {direct_layer_map, dimensions} = Map.pop(dimensions, :layer_map)
+
     dimensions =
       dimensions
       |> Map.put(:width, width)
@@ -241,11 +287,18 @@ defmodule BackBreeze.Box do
     structured? = Keyword.get(opts, :structured, false)
 
     {content, width, layer_map} =
-      if box.style.overflow == :hidden and scrollbar_config.enabled do
+      if box.style.overflow == :hidden and scrollbar_config.enabled and
+           not Map.get(dimensions, :scrollbar_rendered?, false) do
         {base_layer_map, max_width, max_height} =
-          BenchProfile.measure({__MODULE__, :generate_layer_map}, fn ->
-            cached_generate_layer_map(content)
-          end)
+          case direct_layer_map do
+            layer_map when is_map(layer_map) ->
+              {layer_map, max(width - 1, 0), max(dimensions.height - 1, 0)}
+
+            _ ->
+              BenchProfile.measure({__MODULE__, :generate_layer_map}, fn ->
+                cached_or_generate_layer_map(box, content)
+              end)
+          end
 
         layer_map =
           BackBreeze.Scrollbar.add_to_layer_map(base_layer_map, %{
@@ -262,7 +315,7 @@ defmodule BackBreeze.Box do
             do: nil,
             else:
               BenchProfile.measure({__MODULE__, :layer_maps_to_content}, fn ->
-                cached_layer_maps_to_content(layer_map, %{}, %{
+                cached_or_layer_maps_to_content(box, layer_map, %{}, %{
                   start_x: 0,
                   start_y: 0,
                   max_x: max_width,
@@ -285,7 +338,9 @@ defmodule BackBreeze.Box do
         state: :rendered,
         children: [],
         layer_map: layer_map,
-        overlay?: visual_overflow?(box.style, dimensions.content_height, dimensions.height)
+        overlay?:
+          not Map.get(dimensions, :scrollbar_rendered?, false) and
+            visual_overflow?(box.style, dimensions.content_height, dimensions.height)
     }
 
     %{acc | box: box, dimensions: [{acc.id, dimensions} | acc.dimensions], id: acc.id + 1}
@@ -494,7 +549,7 @@ defmodule BackBreeze.Box do
           else
             BenchProfile.measure({__MODULE__, :container_base_layer}, fn ->
               cached_blank_container_layer_map(box, rendered_width, dimensions.height) ||
-                cached_generate_layer_map(content)
+                cached_or_generate_layer_map(box, content)
             end)
           end
 
@@ -585,7 +640,7 @@ defmodule BackBreeze.Box do
             nil
           else
             BenchProfile.measure({__MODULE__, :layer_maps_to_content}, fn ->
-              cached_layer_maps_to_content(layer_map, child_layer_map, %{
+              cached_or_layer_maps_to_content(box, layer_map, child_layer_map, %{
                 start_x: 0,
                 start_y: 0,
                 max_x: max_width,
@@ -601,6 +656,7 @@ defmodule BackBreeze.Box do
             height: max_height + 1,
             layer: max(box.layer || 0, child_layer || 0),
             state: :rendered,
+            children: [],
             layer_map: merged_layer_map,
             overlay?: has_overlay_children?
         }
@@ -760,11 +816,14 @@ defmodule BackBreeze.Box do
       {:render_self, box.style, content_cache_key(box.content), offset_top,
        if(terminal, do: terminal.size, else: nil)}
 
-    RenderCache.fetch_stable(cache_key, fn ->
+    render = fn ->
       {content, dimensions} = BackBreeze.Style.calculate_and_render(box.style, box.content, opts)
-      max_width = raw_content_width(content)
+      {rendered_width, dimensions} = Map.pop(dimensions, :rendered_width)
+      max_width = rendered_width || raw_content_width(content)
       {content, dimensions, max_width}
-    end)
+    end
+
+    if cacheable_box?(box), do: RenderCache.fetch_stable(cache_key, render), else: render.()
   end
 
   defp normalize_render_self_box(box) do
@@ -800,6 +859,23 @@ defmodule BackBreeze.Box do
   defp renderable_content?(%VirtualText{}), do: true
   defp renderable_content?(_content), do: false
 
+  defp prepare_grid_child(
+         child_box,
+         child_index,
+         {children, dims},
+         box,
+         column_offsets,
+         row_offsets
+       ) do
+    child_box = inherit_parent_colors(child_box, box.style)
+    row_index = div(child_index, box.display.columns)
+    col_index = rem(child_index, box.display.columns)
+    child_left = Enum.at(column_offsets, col_index, 0)
+    child_top = Enum.at(row_offsets, row_index, 0)
+
+    {[child_box | children], [%{dims: nil, left: child_left, top: child_top} | dims]}
+  end
+
   defp render_children(
          %{box: %{children: children, display: %BackBreeze.Grid{}} = box} = acc,
          opts
@@ -825,74 +901,86 @@ defmodule BackBreeze.Box do
           {%{display: %BackBreeze.Grid{}, children: nested_children} = child_box, child_index},
           child_acc
           when nested_children != [] ->
-            child_box = inherit_parent_colors(child_box, box.style)
-            row_index = div(child_index, box.display.columns)
-            col_index = rem(child_index, box.display.columns)
-            child_left = Enum.at(column_offsets, col_index, 0)
-            child_top = Enum.at(row_offsets, row_index, 0)
+            if cacheable_box?(child_box) do
+              child_box = inherit_parent_colors(child_box, box.style)
+              row_index = div(child_index, box.display.columns)
+              col_index = rem(child_index, box.display.columns)
+              child_left = Enum.at(column_offsets, col_index, 0)
+              child_top = Enum.at(row_offsets, row_index, 0)
 
-            style = %{
-              child_box.style
-              | width: Enum.at(column_widths, col_index, item_width),
-                height: Enum.at(row_heights, row_index, item_height)
-            }
+              style = %{
+                child_box.style
+                | width: Enum.at(column_widths, col_index, item_width),
+                  height: Enum.at(row_heights, row_index, item_height)
+              }
 
-            %{
-              content: content,
-              width: w,
-              height: h,
-              content_height: content_height,
-              per_item_dimensions: inner_dimensions,
-              layer_map: nested_layer_map
-            } =
-              BackBreeze.Grid.render_structured_with_dimensions(
-                child_box.children,
-                child_box.display,
-                style,
-                opts
-              )
-
-            {children, dims} = child_acc
-
-            child = %{
-              child_box
-              | children: [],
+              %{
                 content: content,
                 width: w,
                 height: h,
-                state: :rendered,
-                layer_map: nested_layer_map,
-                overlay?:
-                  visual_overflow?(style, content_height, h) ||
-                    contains_overlay_descendants?(child_box)
-            }
+                content_height: content_height,
+                per_item_dimensions: inner_dimensions,
+                layer_map: nested_layer_map
+              } =
+                BackBreeze.Grid.render_structured_with_dimensions(
+                  child_box.children,
+                  child_box.display,
+                  style,
+                  opts
+                )
 
-            container_dim = %{
-              content_height: h,
-              viewport_height: h,
-              height: h,
-              width: w,
-              viewport_width: w,
-              content_width: w,
-              left: child_left,
-              top: child_top
-            }
+              {children, dims} = child_acc
 
-            shifted_inner_dimensions =
-              inner_dimensions
-              |> List.flatten()
-              |> shift_dimensions(child_left, child_top)
+              child = %{
+                child_box
+                | children: [],
+                  content: content,
+                  width: w,
+                  height: h,
+                  state: :rendered,
+                  layer_map: nested_layer_map,
+                  overlay?:
+                    visual_overflow?(style, content_height, h) ||
+                      contains_overlay_descendants?(child_box)
+              }
 
-            {[child | children], [%{dims: [container_dim | shifted_inner_dimensions]} | dims]}
+              container_dim = %{
+                content_height: h,
+                viewport_height: h,
+                height: h,
+                width: w,
+                viewport_width: w,
+                content_width: w,
+                left: child_left,
+                top: child_top
+              }
+
+              shifted_inner_dimensions =
+                inner_dimensions
+                |> List.flatten()
+                |> shift_dimensions(child_left, child_top)
+
+              {[child | children], [%{dims: [container_dim | shifted_inner_dimensions]} | dims]}
+            else
+              prepare_grid_child(
+                child_box,
+                child_index,
+                child_acc,
+                box,
+                column_offsets,
+                row_offsets
+              )
+            end
 
           {child_box, child_index}, child_acc ->
-            child_box = inherit_parent_colors(child_box, box.style)
-            row_index = div(child_index, box.display.columns)
-            col_index = rem(child_index, box.display.columns)
-            child_left = Enum.at(column_offsets, col_index, 0)
-            child_top = Enum.at(row_offsets, row_index, 0)
-            {children, dims} = child_acc
-            {[child_box | children], [%{dims: nil, left: child_left, top: child_top} | dims]}
+            prepare_grid_child(
+              child_box,
+              child_index,
+              child_acc,
+              box,
+              column_offsets,
+              row_offsets
+            )
         end)
         |> then(fn {children, dims} -> {Enum.reverse(children), Enum.reverse(dims)} end)
       end)
@@ -3137,6 +3225,17 @@ defmodule BackBreeze.Box do
   end
 
   def join_vertical(items, opts) do
+    case single_line_items_metrics(items) do
+      {:ok, max_width, line_count} ->
+        sliced_items = slice_vertical_items(items, opts)
+        {Enum.join(sliced_items, "\n"), max_width, line_count}
+
+      :multiline ->
+        do_join_vertical(items, opts)
+    end
+  end
+
+  defp do_join_vertical(items, opts) do
     max_width =
       items
       |> Enum.map(&raw_content_width/1)
@@ -3144,6 +3243,8 @@ defmodule BackBreeze.Box do
 
     items =
       Enum.flat_map(items, &:binary.split(&1, "\n", [:global]))
+
+    line_count = length(items)
 
     items =
       case Keyword.get(opts, :height) do
@@ -3167,7 +3268,38 @@ defmodule BackBreeze.Box do
           items
       end
 
-    {Enum.join(items, "\n"), max_width, length(items)}
+    {Enum.join(items, "\n"), max_width, line_count}
+  end
+
+  defp single_line_items_metrics(items) do
+    Enum.reduce_while(items, {:ok, 0, 0}, fn item, {:ok, max_width, line_count} ->
+      case content_metrics(item) do
+        {width, 1} -> {:cont, {:ok, max(max_width, width), line_count + 1}}
+        _ -> {:halt, :multiline}
+      end
+    end)
+  end
+
+  defp slice_vertical_items(items, opts) do
+    case Keyword.get(opts, :height) do
+      :screen ->
+        {_screen_width, screen_height} =
+          BackBreeze.screen_dimensions(Keyword.get(opts, :terminal))
+
+        slice_vertical_items(items, screen_height, opts)
+
+      height when is_integer(height) ->
+        slice_vertical_items(items, height, opts)
+
+      _ ->
+        items
+    end
+  end
+
+  defp slice_vertical_items(items, height, opts) do
+    {start_pos, _} = Keyword.get(opts, :scroll, {0, 0})
+    end_pos = height + start_pos - 1
+    Enum.slice(items, start_pos..end_pos//1)
   end
 
   @doc false
@@ -3178,6 +3310,16 @@ defmodule BackBreeze.Box do
   end
 
   def join_horizontal(items, opts) do
+    case single_line_horizontal_content(items) do
+      {:ok, content, width} ->
+        {content, width, 0}
+
+      :multiline ->
+        do_join_horizontal(items, opts)
+    end
+  end
+
+  defp do_join_horizontal(items, opts) do
     items = Enum.map(items, fn x -> {max(rendered_height(x) - 1, 0), x} end)
 
     {max_height, _} = Enum.max(items)
@@ -3200,6 +3342,20 @@ defmodule BackBreeze.Box do
       |> Enum.join("\n")
 
     {content, width, max_height}
+  end
+
+  defp single_line_horizontal_content(items) do
+    items
+    |> Enum.reduce_while({[], 0}, fn item, {acc, total_width} ->
+      case content_metrics(item) do
+        {width, 1} -> {:cont, {[item | acc], total_width + width}}
+        _ -> {:halt, :multiline}
+      end
+    end)
+    |> case do
+      :multiline -> :multiline
+      {reversed_items, width} -> {:ok, IO.iodata_to_binary(Enum.reverse(reversed_items)), width}
+    end
   end
 
   defp normalize_width(items, opts) do

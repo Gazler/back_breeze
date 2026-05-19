@@ -4,7 +4,7 @@ defmodule BackBreeze.VirtualText do
   materializing every visible ancestor render.
   """
 
-  defstruct [:content, :cache_key, :intrinsic_width, :line_count_fn, :slice_fn]
+  defstruct [:content, :cache_key, :intrinsic_width, :line_count_fn, :slice_fn, cache?: true]
 
   def new(content) when is_binary(content),
     do: %__MODULE__{content: content, cache_key: {:binary, content}}
@@ -14,7 +14,8 @@ defmodule BackBreeze.VirtualText do
       cache_key: Keyword.fetch!(opts, :cache_key),
       intrinsic_width: Keyword.fetch!(opts, :intrinsic_width),
       line_count_fn: Keyword.fetch!(opts, :line_count_fn),
-      slice_fn: Keyword.fetch!(opts, :slice_fn)
+      slice_fn: Keyword.fetch!(opts, :slice_fn),
+      cache?: Keyword.get(opts, :cache?, true)
     }
   end
 end
