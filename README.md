@@ -1,82 +1,82 @@
 # BackBreeze
 
-A terminal layout rendering library built on top of [Termite](https://github.com/Gazler/termite)
+BackBreeze is a terminal layout and rendering library for Elixir. It builds
+styled boxes, grids, overlays, and scrollable regions, then renders them to text
+for output through [Termite](https://github.com/gazler/termite) or plain
+`IO.puts/1`.
 
-## Features
+It is intended for terminal UIs that need predictable layout without carrying a
+full widget framework.
 
- * ANSI colors and text styling
- * text reflowing/overflow
- * text offsets to allow for scrolling
- * optional viewport scrollbars for overflow-hidden regions
- * configurable scrollbar axis/placement/chars/colors/arrows
- * joining text horizontally/vertically
- * grid based rendering
- * absolute positioning
+## Breeze
 
-## Scrollbar configuration
+For a full TUI framework, see [Breeze](https://github.com/gazler/breeze).
+Breeze is a LiveView-inspired TUI library built on Termite and BackBreeze, with
+views, components, templates, events, and common UI blocks.
 
-```elixir
-BackBreeze.Box.new(
-  style: %{
-    border: :line,
-    width: 30,
-    height: 8,
-    overflow: :hidden,
-    scrollbar: %{
-      axis: :both,
-      show: :auto,
-      placement: :end,
-      arrows: true,
-      thumb: %{char: "▓", foreground_color: 2, bold: true},
-      track: %{char: "·", foreground_color: 8}
-    }
-  },
-  scroll: {3, 10},
-  children: [BackBreeze.Box.new(content: "...")]
-)
-```
-
-Supported scrollbar shorthands remain available:
-`false | true | :vertical | :horizontal | :both`.
-
-By default, scrollbar thumbs scale proportionally to viewport/content size. You can
-override with `sizing: {:fixed, n}` if you want fixed-size thumbs. In `:inset` mode,
-scrollbars render on the border gutter when a border exists, preserving content columns.
+Documentation is available at https://breeze.hexdocs.pm.
 
 ## Installation
 
-He package can be installed by adding `back_breeze` to your list of dependencies in `mix.exs`:
+Add `back_breeze` to your dependencies:
 
 ```elixir
 def deps do
   [
-    {:back_breeze, "~> 0.2.0"}
+    {:back_breeze, "~> 0.4.0"}
   ]
 end
 ```
 
-## Examples
+## Example
 
 ```elixir
-Mix.install([{:back_breeze, "~> 0.2.0"}])
+Mix.install([{:back_breeze, "~> 0.4.0"}])
 
-content =
-  "Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod tempor incididunt ut labore et dolore magna aliqua. Ut enim ad minim veniam, quis nostrud exercitation ullamco laboris nisi ut aliquip ex ea commodo consequat."
-
-child = BackBreeze.Box.new(%{style: %{border: :line, width: 30}, content: content})
-box = BackBreeze.Box.new(children: [child]) |> BackBreeze.Box.render()
+box =
+  BackBreeze.Box.new(
+    style: %{border: :rounded, width: 40, padding: 1},
+    children: [
+      BackBreeze.Box.new(
+        style: %{foreground_color: 4, bold: true},
+        content: "BackBreeze"
+      ),
+      BackBreeze.Box.new(
+        content: "Boxes can contain text, styled children, and layout rules."
+      )
+    ]
+  )
+  |> BackBreeze.Box.render()
 
 IO.puts(box.content)
-
 ```
 
-More examples are available in the examples directory.
+## What It Provides
+
+BackBreeze keeps the public surface small. Most rendering starts with
+`BackBreeze.Box.new/1` and ends with `BackBreeze.Box.render/2`.
+
+Core layout features include:
+
+* borders, padding, colors, and text styling
+* text spans for mixed styling within shared text layout
+* virtual text sources for lazy or viewport-oriented content
+* automatic text wrapping and overflow handling
+* inline, block, absolute, and fixed positioning
+* grid layout with rows, columns, and gaps
+* scroll offsets and optional scrollbars for clipped regions
+* dimension tracking for higher-level viewport handling
+
+See the `examples/` directory for focused examples of boxes, grids, overflow,
+scrollbars, absolute positioning, repeated fills, and fullscreen rendering.
 
 ## Documentation
 
-https://hexdocs.pm/back_breeze
+API documentation is available on HexDocs:
 
-Documentation can be generated with ExDoc using:
+https://back-breeze.hexdocs.pm
+
+You can also generate the documentation locally:
 
 ```sh
 mix docs
