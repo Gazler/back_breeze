@@ -5,7 +5,7 @@ defmodule BackBreeze.RenderCache do
 
   @table :back_breeze_render_cache
   @max_entries 4_096
-  @max_memory_words 8_000_000
+  @max_memory_words 32_000_000
   @generation_key {__MODULE__, :generation_counter}
 
   def start_link(opts \\ []) do
@@ -67,6 +67,9 @@ defmodule BackBreeze.RenderCache do
     :ets.info(@table, :size)
   end
 
+  @doc false
+  def max_memory_words, do: @max_memory_words
+
   def advance_generation do
     ensure_started()
     :counters.add(generation_ref(), 1, 1)
@@ -114,7 +117,16 @@ defmodule BackBreeze.RenderCache do
   end
 
   defp disabled? do
-    System.get_env("BACK_BREEZE_DISABLE_RENDER_CACHE") in ["1", "true", "TRUE"]
+    Application.get_env(:back_breeze, :disable_render_cache, false) in [true, "1", "true", "TRUE"] or
+      system_env_disabled?()
+  end
+
+  defp system_env_disabled? do
+    if function_exported?(System, :get_env, 1) do
+      System.get_env("BACK_BREEZE_DISABLE_RENDER_CACHE") in ["1", "true", "TRUE"]
+    else
+      false
+    end
   end
 
   defp ensure_started do

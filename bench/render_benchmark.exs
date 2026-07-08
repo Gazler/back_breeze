@@ -43,7 +43,9 @@ defmodule BackBreeze.RenderBenchmark do
 
     scenarios(tree_file, width, height)
     |> maybe_filter(filter, width, height)
-    |> Enum.each(&run_scenario(&1, iterations, subtree_depth, top, phase_profile?, cold?, warmup_iterations))
+    |> Enum.each(
+      &run_scenario(&1, iterations, subtree_depth, top, phase_profile?, cold?, warmup_iterations)
+    )
   end
 
   defp maybe_print_usage_summary(argv, opts) do
@@ -74,8 +76,18 @@ defmodule BackBreeze.RenderBenchmark do
 
   defp no_benchmark_overrides?(opts) do
     Enum.all?(
-      [:iterations, :scenario, :tree_file, :width, :height, :subtree_depth, :top, :phase_profile,
-       :cold, :warmup],
+      [
+        :iterations,
+        :scenario,
+        :tree_file,
+        :width,
+        :height,
+        :subtree_depth,
+        :top,
+        :phase_profile,
+        :cold,
+        :warmup
+      ],
       &(not Keyword.has_key?(opts, &1))
     )
   end
@@ -147,7 +159,15 @@ defmodule BackBreeze.RenderBenchmark do
     end
 
     if is_integer(subtree_depth) do
-      print_subtree_breakdown(box, terminal, iterations, subtree_depth, top, cold?, warmup_iterations)
+      print_subtree_breakdown(
+        box,
+        terminal,
+        iterations,
+        subtree_depth,
+        top,
+        cold?,
+        warmup_iterations
+      )
     end
   end
 
@@ -158,11 +178,22 @@ defmodule BackBreeze.RenderBenchmark do
     |> Enum.sort_by(fn {_label, stats} -> stats.total_us end, :desc)
     |> Enum.each(fn {label, stats} ->
       avg_us = stats.total_us / max(stats.count, 1)
-      IO.puts("    #{inspect(label)} total=#{format_us(stats.total_us)} avg=#{format_us(avg_us)} max=#{format_us(stats.max_us)} count=#{stats.count}")
+
+      IO.puts(
+        "    #{inspect(label)} total=#{format_us(stats.total_us)} avg=#{format_us(avg_us)} max=#{format_us(stats.max_us)} count=#{stats.count}"
+      )
     end)
   end
 
-  defp print_subtree_breakdown(box, terminal, iterations, subtree_depth, top, cold?, warmup_iterations) do
+  defp print_subtree_breakdown(
+         box,
+         terminal,
+         iterations,
+         subtree_depth,
+         top,
+         cold?,
+         warmup_iterations
+       ) do
     IO.puts("  subtree breakdown (depth=#{subtree_depth}, top=#{top}):")
 
     box
@@ -199,7 +230,9 @@ defmodule BackBreeze.RenderBenchmark do
     box.children
     |> Enum.with_index()
     |> Enum.filter(fn {child, _} -> is_struct(child, BackBreeze.Box) end)
-    |> Enum.flat_map(fn {child, index} -> do_subtrees_at_depth(child, depth - 1, path ++ [index]) end)
+    |> Enum.flat_map(fn {child, index} ->
+      do_subtrees_at_depth(child, depth - 1, path ++ [index])
+    end)
   end
 
   defp measure(box, terminal, iterations, cold?, warmup_iterations) do
@@ -240,7 +273,9 @@ defmodule BackBreeze.RenderBenchmark do
     Enum.at(sorted, index)
   end
 
-  defp format_us(us) when is_float(us), do: :erlang.float_to_binary(us / 1_000, decimals: 2) <> "ms"
+  defp format_us(us) when is_float(us),
+    do: :erlang.float_to_binary(us / 1_000, decimals: 2) <> "ms"
+
   defp format_us(us), do: format_us(us * 1.0)
 
   defp apply_env_defaults(opts) do
@@ -302,8 +337,9 @@ defmodule BackBreeze.RenderBenchmark do
       {"nested_grid", {80, 24}, &nested_grid/0},
       {"posting_like_small", {80, 24}, &posting_like/0},
       {"posting_like_medium", {120, 36}, &posting_like/0},
-      {"posting_like_wide", {250, 36}, &posting_like/0}
-      ]
+      {"posting_like_wide", {250, 36}, &posting_like/0},
+      {"large_styled_list", {240, 80}, &large_styled_list/0}
+    ]
   end
 
   defp scenarios(tree_file, width, height) do
@@ -394,6 +430,149 @@ defmodule BackBreeze.RenderBenchmark do
       ]
     )
   end
+
+  defp large_styled_list do
+    Box.new(
+      style: %{width: :screen, height: :screen},
+      children: [
+        Box.new(
+          style: %{display: :inline, height: 3},
+          children: [
+            Box.new(content: " Hex.pm package browser ", style: %{bold: true, width: 32}),
+            Box.new(content: "Search   ecto, phoenix, live_view", style: %{width: 80}),
+            Box.new(content: "100 packages", style: %{width: 20, foreground_color: 8})
+          ]
+        ),
+        Box.new(
+          style: %{display: %Grid{columns: 2}, height: 74},
+          children: [
+            package_list_panel(),
+            package_detail_panel()
+          ]
+        ),
+        Box.new(
+          style: %{display: :inline, height: 1},
+          children: [
+            keycap("/"),
+            Box.new(content: "Search  "),
+            keycap("Enter"),
+            Box.new(content: "Run  "),
+            keycap("g"),
+            Box.new(content: "Open  "),
+            keycap("q"),
+            Box.new(content: "Quit")
+          ]
+        )
+      ]
+    )
+  end
+
+  defp package_list_panel do
+    rows =
+      Enum.map(1..100, fn index ->
+        selected? = index == 23
+
+        Box.new(
+          style: %{
+            display: :inline,
+            height: 1,
+            width: :full,
+            background_color: if(selected?, do: 4, else: 0),
+            foreground_color: if(selected?, do: 0, else: 7)
+          },
+          children: [
+            Box.new(content: if(selected?, do: ">", else: " "), style: %{width: 1}),
+            Box.new(
+              content: package_name(index),
+              style: %{width: 24, bold: true}
+            ),
+            Box.new(
+              content: "#{rem(index, 9) + 1}.#{rem(index, 17)}.#{rem(index, 23)}",
+              style: %{width: 12}
+            ),
+            Box.new(
+              content: format_downloads(index * 123_456),
+              style: %{width: 14, foreground_color: 5}
+            )
+          ]
+        )
+      end)
+
+    Box.new(
+      style: %{border: :rounded, height: 74, background_color: 0, overflow: :hidden},
+      children: [
+        Box.new(content: "Packages", style: %{bold: true, height: 1}),
+        Box.new(
+          style: %{display: :inline, height: 1, foreground_color: 8},
+          children: [
+            Box.new(content: "Name", style: %{width: 25}),
+            Box.new(content: "Latest", style: %{width: 12}),
+            Box.new(content: "Downloads", style: %{width: 14})
+          ]
+        ),
+        Box.new(
+          style: %{
+            height: 70,
+            overflow: :hidden,
+            scrollbar: %{axis: :vertical, arrows: true, show: :always}
+          },
+          children: rows
+        )
+      ]
+    )
+  end
+
+  defp package_detail_panel do
+    Box.new(
+      style: %{border: :rounded, height: 74, background_color: 0, overflow: :hidden},
+      children: [
+        Box.new(content: "Package", style: %{bold: true, height: 1}),
+        Box.new(
+          style: %{display: :inline, height: 2},
+          children: [
+            Box.new(content: "postgrex", style: %{width: 28, bold: true, foreground_color: 4}),
+            Box.new(content: "1.0.0", style: %{width: 14, foreground_color: 5}),
+            Box.new(content: "2.8m downloads", style: %{width: 30, foreground_color: 8})
+          ]
+        ),
+        Box.new(content: " Overview  Releases  Links ", style: %{height: 1, foreground_color: 4}),
+        Box.new(content: "PostgreSQL driver for Elixir.", style: %{height: 2}),
+        detail_field("Latest", "1.0.0"),
+        detail_field("License", "Apache-2.0"),
+        detail_field("Updated", "2026-05-12"),
+        detail_field("Published", "2014-04-22"),
+        detail_field("Docs", "https://postgrex.hexdocs.pm/"),
+        detail_field("Hex", "https://hex.pm/packages/postgrex")
+      ]
+    )
+  end
+
+  defp detail_field(label, value) do
+    Box.new(
+      style: %{display: :inline, height: 1},
+      children: [
+        Box.new(content: label, style: %{width: 12, foreground_color: 8}),
+        Box.new(content: value)
+      ]
+    )
+  end
+
+  defp package_name(index) do
+    names =
+      ~w(jason certifi idna parse_trans hackney ssl_verify_fun unicode_util_compat mimerl metrics gettext plug ranch telemetry mime decimal plug_crypto phoenix db_connection cowboy ecto tzdata plug_cowboy postgrex phoenix_pubsub timex httpoison ecto_sql poison combine jose nimble_parsec connection cowlib recon ex_doc excoveralls makeup makeup_elixir dialyxir credo prometheus bunt poolboy phoenix_html file_system phoenix_ecto junit_formatter erlex ex_machina verl erlsom elixir_make msgpax sentry xml_builder optimal castore jsx)
+
+    base = Enum.at(names, rem(index - 1, length(names)))
+
+    if index > length(names), do: "#{base}_#{index}", else: base
+  end
+
+  defp format_downloads(value) when value >= 1_000_000,
+    do: "#{Float.round(value / 1_000_000, 1)}m"
+
+  defp format_downloads(value) when value >= 1_000,
+    do: "#{Float.round(value / 1_000, 1)}k"
+
+  defp format_downloads(value), do: Integer.to_string(value)
 
   defp posting_like do
     Box.new(
@@ -516,7 +695,11 @@ defmodule BackBreeze.RenderBenchmark do
       end)
 
     Box.new(
-      style: %{height: 7, overflow: :hidden, scrollbar: %{axis: :vertical, arrows: true, show: :always}},
+      style: %{
+        height: 7,
+        overflow: :hidden,
+        scrollbar: %{axis: :vertical, arrows: true, show: :always}
+      },
       children: rows
     )
   end
@@ -535,7 +718,13 @@ defmodule BackBreeze.RenderBenchmark do
 
     Box.new(
       style: %{border: :rounded, height: 10},
-      children: [Box.new(content: " Body  Headers  Cookies  Trace ", style: %{foreground_color: 4, bold: true}) | body]
+      children: [
+        Box.new(
+          content: " Body  Headers  Cookies  Trace ",
+          style: %{foreground_color: 4, bold: true}
+        )
+        | body
+      ]
     )
   end
 

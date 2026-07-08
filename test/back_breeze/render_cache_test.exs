@@ -80,16 +80,25 @@ defmodule BackBreeze.RenderCacheTest do
       end)
 
     assert stable_keys != []
-    assert :ets.info(:back_breeze_render_cache, :memory) < 8_000_000
+    assert :ets.info(:back_breeze_render_cache, :memory) < RenderCache.max_memory_words()
   end
 
   test "resets the cache once it reaches the memory limit" do
     large = Enum.map(1..200_000, fn idx -> {idx, Integer.to_string(idx)} end)
 
-    Enum.each(1..10, fn idx ->
-      assert RenderCache.fetch_stable({:large, idx}, fn -> large end) == large
-    end)
+    reset_size =
+      Enum.reduce_while(1..50, nil, fn idx, _reset_size ->
+        assert RenderCache.fetch_stable({:large, idx}, fn -> large end) == large
 
-    assert RenderCache.size() < 10
+        size = RenderCache.size()
+
+        if size < idx do
+          {:halt, size}
+        else
+          {:cont, nil}
+        end
+      end)
+
+    assert is_integer(reset_size)
   end
 end

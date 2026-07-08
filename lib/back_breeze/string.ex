@@ -29,8 +29,7 @@ defmodule BackBreeze.String do
     {str, _, word, line, _} =
       str
       |> String.graphemes()
-      |> Enum.reduce({"", 0, "", "", false}, fn char,
-                                                {acc, cur_width, cur_word, cur_line, in_ansi} ->
+      |> Enum.reduce({"", 0, "", "", false}, fn char, {acc, cur_width, cur_word, cur_line, in_ansi} ->
         char_width = Ucwidth.width(char)
         next_width = cur_width + char_width
 

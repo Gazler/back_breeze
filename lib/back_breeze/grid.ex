@@ -47,7 +47,7 @@ defmodule BackBreeze.Grid do
         style_value(style, :padding_top) +
         style_value(style, :padding_bottom)
 
-    rows = Enum.chunk_every(items, grid.columns)
+    rows = items |> flow_grid_items() |> Enum.chunk_every(grid.columns)
     row_count = grid.rows || length(rows)
     gap_x = max(grid.gap_x || 0, 0)
     gap_y = max(grid.gap_y || 0, 0)
@@ -92,8 +92,7 @@ defmodule BackBreeze.Grid do
     RenderCache.with_frame(fn ->
       if cacheable_items?(items) do
         RenderCache.fetch_stable(
-          {:grid_render_with_dimensions, structured?, if(terminal, do: terminal.size, else: nil),
-           items, grid, style},
+          {:grid_render_with_dimensions, structured?, if(terminal, do: terminal.size, else: nil), items, grid, style},
           fn ->
             do_render_with_dimensions(items, grid, style, opts, structured?)
           end
@@ -127,6 +126,11 @@ defmodule BackBreeze.Grid do
 
   defp simple_vertical_grid?(_grid), do: false
 
+  defp flow_grid_items(items), do: Enum.reject(items, &positioned_grid_item?/1)
+
+  defp positioned_grid_item?(%{position: position}), do: position in [:absolute, :fixed]
+  defp positioned_grid_item?(_item), do: false
+
   defp do_render_grid_with_dimensions(items, grid, style, opts, structured?) do
     {screen_width, screen_height} = BackBreeze.screen_dimensions(Keyword.get(opts, :terminal))
 
@@ -145,7 +149,8 @@ defmodule BackBreeze.Grid do
         style_value(style, :padding_top) +
         style_value(style, :padding_bottom)
 
-    rows = Enum.chunk_every(items, grid.columns)
+    flow_items = flow_grid_items(items)
+    rows = Enum.chunk_every(flow_items, grid.columns)
     row_count = grid.rows || length(rows)
 
     total_width =
@@ -177,165 +182,110 @@ defmodule BackBreeze.Grid do
     column_offsets = prefix_offsets(column_widths, gap_x)
     row_offsets = prefix_offsets(row_heights, gap_y)
 
-    rows_with_results =
+    rendered_results =
       BenchProfile.measure({__MODULE__, :children}, fn ->
-        rows
-        |> Enum.with_index()
-        |> Enum.map(fn {cols, row_index} ->
-          row_height = Enum.at(row_heights, row_index, 0)
+        {results, _flow_index} =
+          Enum.map_reduce(items, 0, fn item, flow_index ->
+            if positioned_grid_item?(item) do
+              {
+                %{
+                  item: item,
+                  flow_index: nil,
+                  result: render_grid_item(item, item.style, structured?, opts)
+                },
+                flow_index
+              }
+            else
+              row_index = div(flow_index, grid.columns)
+              col_index = rem(flow_index, grid.columns)
+              row_height = Enum.at(row_heights, row_index, 0)
+              col_width = Enum.at(column_widths, col_index, 0)
 
-          cols
-          |> Enum.with_index()
-          |> Enum.map(fn {item, col_index} ->
-            col_width = Enum.at(column_widths, col_index, 0)
-            width = col_width
-            height = row_height
-
-            style =
-              if BackBreeze.Box.positioned_overlay?(item) do
-                item.style
-              else
-                %{item.style | width: max(width, 0), height: max(height, 0)}
-              end
-
-            %{
-              item: item,
-              result: render_grid_item(item, style, structured?, opts)
-            }
-          end)
-        end)
-      end)
-
-    {per_item_dimensions, rendered_children, simple_row_or_column?} =
-      rows_with_results
-      |> Enum.with_index()
-      |> Enum.reduce({[], [], true}, fn {row, row_index}, {dims_acc, children_acc, simple_acc} ->
-        top = Enum.at(row_offsets, row_index, 0)
-
-        {row_dims, row_children, row_simple?} =
-          row
-          |> Enum.with_index()
-          |> Enum.reduce({[], [], simple_acc}, fn
-            {%{result: %{dimensions: dimensions, box: item_box}}, col_index},
-            {dims_row_acc, children_row_acc, simple_row_acc} ->
-              left = Enum.at(column_offsets, col_index, 0)
-
-              overlay? = item_box.overlay?
-              layer = if(overlay?, do: max(item_box.layer || 0, 1), else: item_box.layer || 0)
-
-              {shifted_dimensions, child} =
-                if BackBreeze.Box.positioned_overlay?(item_box) do
-                  {resolved_left, resolved_top} =
-                    resolve_positioned_overlay_origin(item_box, total_width, total_height, opts)
-
-                  {Enum.map(dimensions, &shift_dimension(&1, resolved_left, resolved_top)),
-                   %{
-                     item_box
-                     | left: resolved_left,
-                       top: resolved_top,
-                       position: :absolute,
-                       layer: layer,
-                       overlay?: overlay?
-                   }}
-                else
-                  {
-                    Enum.map(dimensions, &shift_dimension(&1, left, top)),
-                    %{
-                      item_box
-                      | left: left,
-                        top: top,
-                        layer: layer,
-                        overlay?: overlay?
-                    }
-                  }
-                end
+              style = %{item.style | width: max(col_width, 0), height: max(row_height, 0)}
 
               {
-                [shifted_dimensions | dims_row_acc],
-                [child | children_row_acc],
-                simple_row_acc and not overlay? and
-                  not BackBreeze.Box.positioned_overlay?(item_box)
+                %{
+                  item: item,
+                  flow_index: flow_index,
+                  result: render_grid_item(item, style, structured?, opts)
+                },
+                flow_index + 1
               }
+            end
           end)
 
-        {
-          dims_acc ++ Enum.reverse(row_dims),
-          children_acc ++ Enum.reverse(row_children),
-          row_simple?
-        }
+        results
       end)
 
-    {content, rendered_width, rendered_height, layer_map} =
+    {per_item_dimensions, rendered_flow_children, rendered_overlay_children, simple_row_or_column?} =
+      rendered_results
+      |> Enum.reduce({[], [], [], true}, fn
+        %{flow_index: nil, result: %{dimensions: dimensions, box: item_box}},
+        {dims_acc, flow_acc, overlay_acc, _simple_acc} ->
+          overlay? = item_box.overlay?
+          layer = if(overlay?, do: max(item_box.layer || 0, 1), else: item_box.layer || 0)
+
+          {resolved_left, resolved_top} =
+            resolve_positioned_overlay_origin(item_box, total_width, total_height, opts)
+
+          child = %{
+            item_box
+            | left: resolved_left,
+              top: resolved_top,
+              layer: layer,
+              overlay?: overlay?
+          }
+
+          shifted_dimensions =
+            Enum.map(dimensions, &shift_dimension(&1, resolved_left, resolved_top))
+
+          {[shifted_dimensions | dims_acc], flow_acc, [child | overlay_acc], false}
+
+        %{flow_index: flow_index, result: %{dimensions: dimensions, box: item_box}},
+        {dims_acc, flow_acc, overlay_acc, simple_acc} ->
+          row_index = div(flow_index, grid.columns)
+          col_index = rem(flow_index, grid.columns)
+          left = Enum.at(column_offsets, col_index, 0)
+          top = Enum.at(row_offsets, row_index, 0)
+          overlay? = item_box.overlay?
+          layer = if(overlay?, do: max(item_box.layer || 0, 1), else: item_box.layer || 0)
+
+          child = %{
+            item_box
+            | left: left,
+              top: top,
+              layer: layer,
+              overlay?: overlay?
+          }
+
+          shifted_dimensions = Enum.map(dimensions, &shift_dimension(&1, left, top))
+
+          {
+            [shifted_dimensions | dims_acc],
+            [child | flow_acc],
+            overlay_acc,
+            simple_acc and not overlay? and not positioned_grid_item?(item_box)
+          }
+      end)
+      |> then(fn {dims, flow_children, overlay_children, simple?} ->
+        {Enum.reverse(dims), Enum.reverse(flow_children), Enum.reverse(overlay_children), simple?}
+      end)
+
+    {content, rendered_width, rendered_height, layer_map, fixed_layer_map} =
       BenchProfile.measure({__MODULE__, :compose}, fn ->
-        use_structured_simple_compose? = simple_compose_from_layer_maps?(rendered_children)
-
-        cond do
-          simple_row_or_column? and grid.columns == 1 and gap_y == 0 and
-              not use_structured_simple_compose? ->
-            rendered_children
-            |> join_rendered_column(total_height)
-            |> then(fn {content, width, height} -> {content, width, height, %{}} end)
-
-          simple_row_or_column? and row_count == 1 and gap_x == 0 and
-              not use_structured_simple_compose? ->
-            rendered_children
-            |> join_rendered_row()
-            |> then(fn {content, width, height} -> {content, width, height, %{}} end)
-
-          simple_row_or_column? and row_count == 1 ->
-            children =
-              rendered_children
-              |> Enum.sort_by(fn child ->
-                {child.layer || 0, -sort_offset(child.top), -sort_offset(child.left),
-                 child.overlay?}
-              end)
-              |> Enum.map(&%{&1 | position: :absolute})
-
-            %{width: width, height: height, layer_map: layer_map} =
-              BackBreeze.Box.compose_absolute_children_layer_map(
-                children,
-                width: total_width,
-                height: compose_target_height(style.height, total_height),
-                clip: true,
-                sorted: true
-              )
-
-            content =
-              if structured? do
-                nil
-              else
-                BackBreeze.Box.layer_map_to_content(layer_map, width, height)
-              end
-
-            {content, width, height, layer_map}
-
-          true ->
-            children =
-              rendered_children
-              |> Enum.sort_by(fn child ->
-                {child.layer || 0, -sort_offset(child.top), -sort_offset(child.left),
-                 child.overlay?}
-              end)
-              |> Enum.map(&%{&1 | position: :absolute})
-
-            %{width: width, height: height, layer_map: layer_map} =
-              BackBreeze.Box.compose_absolute_children_layer_map(
-                children,
-                width: total_width,
-                height: compose_target_height(style.height, total_height),
-                clip: true,
-                sorted: true
-              )
-
-            content =
-              if structured? do
-                nil
-              else
-                BackBreeze.Box.layer_map_to_content(layer_map, width, height)
-              end
-
-            {content, width, height, layer_map}
-        end
+        compose_grid_children(
+          rendered_flow_children,
+          rendered_overlay_children,
+          simple_row_or_column?,
+          grid,
+          row_count,
+          gap_x,
+          gap_y,
+          total_width,
+          total_height,
+          style,
+          structured?
+        )
       end)
 
     %{
@@ -346,7 +296,8 @@ defmodule BackBreeze.Grid do
       content_height: rendered_height,
       per_item_dimensions: per_item_dimensions,
       layer_map: layer_map,
-      rendered_children: rendered_children
+      fixed_layer_map: fixed_layer_map,
+      rendered_children: rendered_flow_children ++ rendered_overlay_children
     }
   end
 
@@ -365,7 +316,8 @@ defmodule BackBreeze.Grid do
         style_value(style, :padding_top) +
         style_value(style, :padding_bottom)
 
-    row_count = grid.rows || length(items)
+    flow_items = flow_grid_items(items)
+    row_count = grid.rows || length(flow_items)
 
     total_width =
       case style.width do
@@ -382,100 +334,80 @@ defmodule BackBreeze.Grid do
 
     row_heights =
       BenchProfile.measure({__MODULE__, :tracks}, fn ->
-        resolve_track_sizes(Enum.map(items, &[&1]), row_count, total_height, :height)
+        resolve_track_sizes(Enum.map(flow_items, &[&1]), row_count, total_height, :height)
       end)
 
     row_offsets = prefix_offsets(row_heights, 0)
 
-    {per_item_dimensions, rendered_children, simple_column?} =
+    {per_item_dimensions, rendered_flow_children, rendered_overlay_children, simple_column?} =
       BenchProfile.measure({__MODULE__, :children}, fn ->
         items
-        |> Enum.with_index()
-        |> Enum.reduce({[], [], true}, fn {item, row_index},
-                                          {dims_acc, children_acc, simple_acc} ->
-          row_height = Enum.at(row_heights, row_index, 0)
+        |> Enum.reduce({[], [], [], true, 0}, fn item, {dims_acc, flow_acc, overlay_acc, simple_acc, flow_index} ->
+          if positioned_grid_item?(item) do
+            %{dimensions: dimensions, box: item_box} =
+              render_grid_item(item, item.style, structured?, opts)
 
-          style =
-            if BackBreeze.Box.positioned_overlay?(item) do
-              item.style
-            else
-              %{item.style | width: max(total_width, 0), height: max(row_height, 0)}
-            end
+            overlay? = item_box.overlay?
+            layer = if(overlay?, do: max(item_box.layer || 0, 1), else: item_box.layer || 0)
 
-          %{dimensions: dimensions, box: item_box} =
-            render_grid_item(item, style, structured?, opts)
+            {resolved_left, resolved_top} =
+              resolve_positioned_overlay_origin(item_box, total_width, total_height, opts)
 
-          top = Enum.at(row_offsets, row_index, 0)
-          overlay? = item_box.overlay?
-          layer = if(overlay?, do: max(item_box.layer || 0, 1), else: item_box.layer || 0)
+            child = %{
+              item_box
+              | left: resolved_left,
+                top: resolved_top,
+                layer: layer,
+                overlay?: overlay?
+            }
 
-          {shifted_dimensions, child} =
-            if BackBreeze.Box.positioned_overlay?(item_box) do
-              {resolved_left, resolved_top} =
-                resolve_positioned_overlay_origin(item_box, total_width, total_height, opts)
+            shifted_dimensions =
+              Enum.map(dimensions, &shift_dimension(&1, resolved_left, resolved_top))
 
-              {Enum.map(dimensions, &shift_dimension(&1, resolved_left, resolved_top)),
-               %{
-                 item_box
-                 | left: resolved_left,
-                   top: resolved_top,
-                   position: :absolute,
-                   layer: layer,
-                   overlay?: overlay?
-               }}
-            else
-              {Enum.map(dimensions, &shift_dimension(&1, 0, top)),
-               %{item_box | left: 0, top: top, layer: layer, overlay?: overlay?}}
-            end
+            {[shifted_dimensions | dims_acc], flow_acc, [child | overlay_acc], false, flow_index}
+          else
+            row_height = Enum.at(row_heights, flow_index, 0)
+            style = %{item.style | width: max(total_width, 0), height: max(row_height, 0)}
 
-          {
-            [shifted_dimensions | dims_acc],
-            [child | children_acc],
-            simple_acc and not overlay? and not BackBreeze.Box.positioned_overlay?(item_box)
-          }
+            %{dimensions: dimensions, box: item_box} =
+              render_grid_item(item, style, structured?, opts)
+
+            top = Enum.at(row_offsets, flow_index, 0)
+            overlay? = item_box.overlay?
+            layer = if(overlay?, do: max(item_box.layer || 0, 1), else: item_box.layer || 0)
+
+            child = %{item_box | left: 0, top: top, layer: layer, overlay?: overlay?}
+            shifted_dimensions = Enum.map(dimensions, &shift_dimension(&1, 0, top))
+
+            {
+              [shifted_dimensions | dims_acc],
+              [child | flow_acc],
+              overlay_acc,
+              simple_acc and not overlay? and not positioned_grid_item?(item_box),
+              flow_index + 1
+            }
+          end
         end)
-        |> then(fn {dims, children, simple?} ->
-          {Enum.reverse(dims), Enum.reverse(children), simple?}
+        |> then(fn {dims, flow_children, overlay_children, simple?, _flow_index} ->
+          {Enum.reverse(dims), Enum.reverse(flow_children), Enum.reverse(overlay_children), simple?}
         end)
       end)
 
-    {content, rendered_width, rendered_height, layer_map} =
+    {content, rendered_width, rendered_height, layer_map, fixed_layer_map} =
       BenchProfile.measure({__MODULE__, :compose}, fn ->
-        use_structured_simple_compose? = simple_compose_from_layer_maps?(rendered_children)
-
-        cond do
-          simple_column? and not use_structured_simple_compose? ->
-            rendered_children
-            |> join_rendered_column(total_height)
-            |> then(fn {content, width, height} -> {content, width, height, %{}} end)
-
-          true ->
-            children =
-              rendered_children
-              |> Enum.sort_by(fn child ->
-                {child.layer || 0, -sort_offset(child.top), -sort_offset(child.left),
-                 child.overlay?}
-              end)
-              |> Enum.map(&%{&1 | position: :absolute})
-
-            %{width: width, height: height, layer_map: layer_map} =
-              BackBreeze.Box.compose_absolute_children_layer_map(
-                children,
-                width: total_width,
-                height: compose_target_height(style.height, total_height),
-                clip: true,
-                sorted: true
-              )
-
-            content =
-              if structured? do
-                nil
-              else
-                BackBreeze.Box.layer_map_to_content(layer_map, width, height)
-              end
-
-            {content, width, height, layer_map}
-        end
+        compose_grid_children(
+          rendered_flow_children,
+          rendered_overlay_children,
+          simple_column?,
+          grid,
+          row_count,
+          0,
+          0,
+          total_width,
+          total_height,
+          style,
+          structured?
+        )
       end)
 
     %{
@@ -486,7 +418,8 @@ defmodule BackBreeze.Grid do
       content_height: rendered_height,
       per_item_dimensions: per_item_dimensions,
       layer_map: layer_map,
-      rendered_children: rendered_children
+      fixed_layer_map: fixed_layer_map,
+      rendered_children: rendered_flow_children ++ rendered_overlay_children
     }
   end
 
@@ -497,6 +430,122 @@ defmodule BackBreeze.Grid do
       true -> rendered || total
     end
   end
+
+  defp compose_grid_children(
+         rendered_flow_children,
+         rendered_overlay_children,
+         simple_row_or_column?,
+         grid,
+         row_count,
+         gap_x,
+         gap_y,
+         total_width,
+         total_height,
+         style,
+         structured?
+       ) do
+    use_structured_simple_compose? = simple_compose_from_layer_maps?(rendered_flow_children)
+
+    {content, width, height, layer_map, fixed_layer_map} =
+      cond do
+        simple_row_or_column? and grid.columns == 1 and gap_y == 0 and
+            not use_structured_simple_compose? ->
+          rendered_flow_children
+          |> join_rendered_column(total_height)
+          |> then(fn {content, width, height} -> {content, width, height, %{}, %{}} end)
+
+        simple_row_or_column? and row_count == 1 and gap_x == 0 and
+            not use_structured_simple_compose? ->
+          rendered_flow_children
+          |> join_rendered_row()
+          |> then(fn {content, width, height} -> {content, width, height, %{}, %{}} end)
+
+        simple_row_or_column? and row_count == 1 ->
+          compose_positioned_grid_children(
+            rendered_flow_children,
+            total_width,
+            total_height,
+            style,
+            structured?
+          )
+
+        true ->
+          compose_positioned_grid_children(
+            rendered_flow_children,
+            total_width,
+            total_height,
+            style,
+            structured?
+          )
+      end
+
+    if rendered_overlay_children == [] do
+      {content, width, height, layer_map, fixed_layer_map}
+    else
+      base_child = %{
+        content: content || "",
+        width: width,
+        height: height,
+        layer: 0,
+        layer_map: layer_map,
+        fixed_layer_map: fixed_layer_map,
+        left: 0,
+        top: 0,
+        position: :absolute,
+        overlay?: false
+      }
+
+      compose_positioned_grid_children(
+        [base_child | rendered_overlay_children],
+        total_width,
+        total_height,
+        style,
+        structured?
+      )
+    end
+  end
+
+  defp compose_positioned_grid_children(children, total_width, total_height, style, structured?) do
+    children =
+      children
+      |> Enum.sort_by(fn child ->
+        {child.layer || 0, -sort_offset(child.top), -sort_offset(child.left), child.overlay?}
+      end)
+      |> Enum.map(&composition_child/1)
+
+    opts = [
+      width: total_width,
+      height: compose_target_height(style.height, total_height),
+      clip: true,
+      sorted: true
+    ]
+
+    %{
+      width: width,
+      height: height,
+      layer_map: layer_map,
+      fixed_layer_map: fixed_layer_map
+    } =
+      case BackBreeze.Box.compose_non_overlapping_children_layer_map(children, opts) do
+        {:ok, result} ->
+          result
+
+        :error ->
+          BackBreeze.Box.compose_absolute_children_layer_map(children, opts)
+      end
+
+    content =
+      if structured? do
+        nil
+      else
+        BackBreeze.Box.layer_maps_to_content(layer_map, fixed_layer_map, width, height)
+      end
+
+    {content, width, height, layer_map, fixed_layer_map}
+  end
+
+  defp composition_child(%{position: :fixed} = child), do: child
+  defp composition_child(child), do: %{child | position: :absolute}
 
   defp compose_target_height(value, total) do
     case value do
@@ -536,6 +585,8 @@ defmodule BackBreeze.Grid do
   end
 
   defp resolve_overlay_edge(_, _, _, _), do: 0
+
+  defp resolve_track_sizes(_rows, track_count, _total, _axis) when track_count <= 0, do: []
 
   defp resolve_track_sizes(rows, track_count, total, axis) do
     explicit =
@@ -664,6 +715,10 @@ defmodule BackBreeze.Grid do
 
   defp simple_compose_from_layer_maps?(children) do
     Enum.any?(children, fn
+      %{fixed_layer_map: fixed_layer_map}
+      when is_map(fixed_layer_map) and map_size(fixed_layer_map) > 0 ->
+        true
+
       %{content: content, layer_map: layer_map}
       when not is_binary(content) and is_map(layer_map) and map_size(layer_map) > 0 ->
         true
@@ -712,9 +767,6 @@ defmodule BackBreeze.Grid do
     {IO.iodata_to_binary(Enum.intersperse(rows, "\n")), width, height}
   end
 
-  defp content_rows(%{content: content}) when is_binary(content),
-    do: :binary.split(content, "\n", [:global])
-
   defp content_rows(child), do: child |> materialized_content() |> :binary.split("\n", [:global])
 
   defp row_at(rows, index) when is_list(rows), do: Enum.at(rows, index)
@@ -735,6 +787,15 @@ defmodule BackBreeze.Grid do
   end
 
   defp rendered_height(_child), do: 0
+
+  defp materialized_content(%{fixed_layer_map: fixed_layer_map} = child)
+       when is_map(fixed_layer_map) and map_size(fixed_layer_map) > 0 do
+    if is_map(child.layer_map) and map_size(child.layer_map) > 0 do
+      BackBreeze.Box.layer_map_to_content(child.layer_map, child.width, child.height)
+    else
+      ""
+    end
+  end
 
   defp materialized_content(%{content: content}) when is_binary(content), do: content
 

@@ -375,6 +375,51 @@ defmodule BackBreeze.BoxTest do
                """
     end
 
+    test "structured blank fixed-height children preserve scroll layout" do
+      spacer =
+        BackBreeze.Box.new(style: %{width: :full, height: 2, overflow: :hidden})
+
+      scroller =
+        BackBreeze.Box.new(
+          scroll: {2, 0},
+          style: %{border: :line, width: 6, height: 4, overflow: :hidden},
+          children: [
+            spacer,
+            BackBreeze.Box.new(content: "A"),
+            BackBreeze.Box.new(content: "B"),
+            BackBreeze.Box.new(content: "C")
+          ]
+        )
+
+      rendered = BackBreeze.Box.render(BackBreeze.Box.new(children: [scroller]))
+
+      assert rendered.content ==
+               """
+               ┌────┐
+               │A   │
+               │B   │
+               └────┘\
+               """
+    end
+
+    test "nested scrolled blank styled children preserve default fill styles" do
+      first_row = BackBreeze.Box.new(style: %{width: :full, height: 1, background_color: 1})
+      second_row = BackBreeze.Box.new(style: %{width: :full, height: 1, background_color: 2})
+
+      scroller =
+        BackBreeze.Box.new(
+          scroll: {1, 0},
+          style: %{width: 4, height: 1, overflow: :hidden},
+          children: [first_row, second_row]
+        )
+
+      direct = BackBreeze.Box.render(scroller)
+      nested = BackBreeze.Box.render(BackBreeze.Box.new(children: [scroller]))
+
+      assert nested.content == direct.content
+      assert nested.content == "\e[48;5;2m    \e[0m"
+    end
+
     test "preserves the left border when horizontally scrolling overflowing child content" do
       box =
         BackBreeze.Box.new(
@@ -550,6 +595,36 @@ defmodule BackBreeze.BoxTest do
                """
     end
 
+    test "absolute composition includes fixed layer content" do
+      child = BackBreeze.Box.new(content: "X", position: :fixed, left: 0, top: 0)
+
+      rendered =
+        BackBreeze.Box.compose_absolute_children([child],
+          width: 1,
+          height: 1,
+          clip: true
+        )
+
+      assert rendered.content == "X"
+      assert rendered.fixed_layer_map == %{{0, 0} => {"X", ""}}
+    end
+
+    test "higher absolute layer renders above lower fixed layer" do
+      fixed = BackBreeze.Box.new(content: "F", position: :fixed, left: 0, top: 0, layer: 0)
+      absolute = BackBreeze.Box.new(content: "A", position: :absolute, left: 0, top: 0, layer: 10)
+
+      box =
+        BackBreeze.Box.new(
+          style: %{width: :screen, height: :screen},
+          children: [fixed, absolute]
+        )
+
+      rendered =
+        BackBreeze.Box.render(box, terminal: %Termite.Terminal{size: %{width: 3, height: 1}})
+
+      assert rendered.content == "A  "
+    end
+
     test "supports centered absolute positioning relative to the parent" do
       child = BackBreeze.Box.new(content: "OK", position: :absolute, left: :center, top: :center)
 
@@ -593,7 +668,50 @@ defmodule BackBreeze.BoxTest do
                """
     end
 
+    test "keeps fixed descendants centered relative to the screen through nested parents" do
+      modal =
+        BackBreeze.Box.new(
+          content: "OK",
+          position: :fixed,
+          left: :center,
+          top: :center
+        )
+
+      body =
+        BackBreeze.Box.new(
+          style: %{width: 20, height: 1, overflow: :hidden},
+          children: [modal]
+        )
+
+      box =
+        BackBreeze.Box.new(
+          style: %{width: :screen, height: :screen, overflow: :hidden},
+          children: [
+            BackBreeze.Box.new(content: "Header", style: %{width: 20, height: 3}),
+            body,
+            BackBreeze.Box.new(content: "Footer", style: %{width: 20, height: 1})
+          ]
+        )
+
+      rendered =
+        BackBreeze.Box.render(box, terminal: %Termite.Terminal{size: %{width: 20, height: 10}})
+
+      lines = String.split(rendered.content, "\n")
+
+      assert lines |> Enum.at(4) |> String.slice(9, 2) == "OK"
+      refute lines |> Enum.at(7) |> String.slice(9, 2) == "OK"
+      assert lines |> Enum.at(4) |> String.slice(0, 6) == "Footer"
+    end
+
     test "grid content sizing ignores symbolic overlay offsets" do
+      base_box =
+        BackBreeze.Box.new(
+          display: %BackBreeze.Grid{columns: 1},
+          children: [
+            BackBreeze.Box.new(content: "body")
+          ]
+        )
+
       box =
         BackBreeze.Box.new(
           display: %BackBreeze.Grid{columns: 1},
@@ -603,11 +721,61 @@ defmodule BackBreeze.BoxTest do
           ]
         )
 
+      base_rendered =
+        BackBreeze.Box.render(base_box,
+          terminal: %Termite.Terminal{size: %{width: 10, height: 4}}
+        )
+
       rendered =
         BackBreeze.Box.render(box, terminal: %Termite.Terminal{size: %{width: 10, height: 4}})
 
       assert rendered.content =~ "body"
-      assert rendered.height == 2
+      assert rendered.height == base_rendered.height
+      assert rendered.width == base_rendered.width
+    end
+
+    test "fixed grid children do not move normal grid rows" do
+      normal_children = [
+        BackBreeze.Box.new(content: "Header", style: %{width: 20, height: 3}),
+        BackBreeze.Box.new(content: "Body", style: %{width: 20, height: 4}),
+        BackBreeze.Box.new(content: "Footer", style: %{width: 20, height: 1})
+      ]
+
+      base_box =
+        BackBreeze.Box.new(
+          display: %BackBreeze.Grid{columns: 1, rows: 3},
+          style: %{width: :screen, height: :screen, overflow: :hidden},
+          children: normal_children
+        )
+
+      box =
+        BackBreeze.Box.new(
+          display: %BackBreeze.Grid{columns: 1, rows: 3},
+          style: %{width: :screen, height: :screen, overflow: :hidden},
+          children:
+            normal_children ++
+              [BackBreeze.Box.new(content: "OK", position: :fixed, left: :center, top: :center)]
+        )
+
+      terminal = %Termite.Terminal{size: %{width: 20, height: 10}}
+
+      base_lines =
+        base_box
+        |> BackBreeze.Box.render(terminal: terminal)
+        |> Map.fetch!(:content)
+        |> String.split("\n")
+
+      lines =
+        box
+        |> BackBreeze.Box.render(terminal: terminal)
+        |> Map.fetch!(:content)
+        |> String.split("\n")
+
+      base_footer_row = Enum.find_index(base_lines, &String.starts_with?(&1, "Footer"))
+      footer_row = Enum.find_index(lines, &String.starts_with?(&1, "Footer"))
+
+      assert footer_row == base_footer_row
+      assert lines |> Enum.at(4) |> String.slice(9, 2) == "OK"
     end
 
     test "auto-height grid includes parent top padding" do
