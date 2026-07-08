@@ -262,8 +262,7 @@ defmodule BackBreeze.Style do
       if windowed_hidden? do
         prepared = prepared_content_entry(str, width, height, overflow)
 
-        {slice_visible_lines(prepared, Keyword.get(opts, :offset_top, 0), height),
-         prepared.line_count}
+        {slice_visible_lines(prepared, Keyword.get(opts, :offset_top, 0), height), prepared.line_count}
       else
         cached_render_lines(source, render_context)
       end
@@ -313,8 +312,7 @@ defmodule BackBreeze.Style do
 
     {content, height} =
       if structured? and is_map(layer_map) do
-        {nil,
-         rendered_row_count(border, padding_top + line_count + padding_bottom + padding_row_count)}
+        {nil, rendered_row_count(border, padding_top + line_count + padding_bottom + padding_row_count)}
       else
         rendered_rows =
           Enum.map(lines, fn line ->
@@ -407,8 +405,7 @@ defmodule BackBreeze.Style do
     %{width: width, height: height, overflow: overflow} = context
 
     BackBreeze.RenderCache.fetch_stable(
-      {__MODULE__, :render_lines, str, width, height, overflow, context.repeat_x,
-       context.repeat_y},
+      {__MODULE__, :render_lines, str, width, height, overflow, context.repeat_x, context.repeat_y},
       fn ->
         str =
           cond do
@@ -435,8 +432,7 @@ defmodule BackBreeze.Style do
     %{width: width, height: height, overflow: overflow} = context
 
     BackBreeze.RenderCache.fetch_stable(
-      {__MODULE__, :render_lines, content, width, height, overflow, context.repeat_x,
-       context.repeat_y},
+      {__MODULE__, :render_lines, content, width, height, overflow, context.repeat_x, context.repeat_y},
       fn ->
         prepared = TextLayout.prepare(content, width, overflow, height)
         lines = TextLayout.visible_lines(prepared, 0, prepared.raw_line_count)
@@ -456,8 +452,7 @@ defmodule BackBreeze.Style do
     %{width: width, height: height, overflow: overflow} = context
 
     BackBreeze.RenderCache.fetch_stable(
-      {__MODULE__, :render_lines, content.cache_key, width, height, overflow, context.repeat_x,
-       context.repeat_y},
+      {__MODULE__, :render_lines, content.cache_key, width, height, overflow, context.repeat_x, context.repeat_y},
       fn ->
         prepared = TextLayout.prepare(content, width, overflow, height)
         lines = TextLayout.visible_lines(prepared, 0, prepared.raw_line_count)

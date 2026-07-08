@@ -240,8 +240,7 @@ defmodule BackBreeze.Scrollbar do
     %{
       config
       | vertical: Map.new(config.vertical, fn {k, s} -> {k, background_segment(s, color)} end),
-        horizontal:
-          Map.new(config.horizontal, fn {k, s} -> {k, background_segment(s, color)} end),
+        horizontal: Map.new(config.horizontal, fn {k, s} -> {k, background_segment(s, color)} end),
         intersection: background_segment(config.intersection, color)
     }
   end
@@ -779,10 +778,8 @@ defmodule BackBreeze.Scrollbar do
       %Segment{
         segment
         | char: char,
-          foreground_color:
-            Map.get(map, :foreground_color, segment.foreground_color || fallback_color),
-          background_color:
-            Map.get(map, :background_color, segment.background_color || fallback_background),
+          foreground_color: Map.get(map, :foreground_color, segment.foreground_color || fallback_color),
+          background_color: Map.get(map, :background_color, segment.background_color || fallback_background),
           bold: Map.get(map, :bold, segment.bold),
           italic: Map.get(map, :italic, segment.italic),
           reverse: Map.get(map, :reverse, segment.reverse)
