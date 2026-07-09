@@ -15,7 +15,11 @@ defmodule BackBreeze.MixProject do
       name: "BackBreeze",
       source_url: "https://github.com/Gazler/back_breeze",
       docs: [
-        source_ref: "v#{@version}"
+        source_ref: "v#{@version}",
+        extras: [
+          "CHANGELOG.md",
+          "README.md"
+        ]
       ]
     ]
   end
@@ -29,7 +33,7 @@ defmodule BackBreeze.MixProject do
 
   defp package() do
     [
-      files: ~w(lib .formatter.exs mix.exs README.md LICENCE.md),
+      files: ~w(lib .formatter.exs mix.exs README.md CHANGELOG.md LICENCE.md),
       licenses: ["MIT"],
       links: %{"GitHub" => "https://github.com/Gazler/back_breeze"}
     ]
