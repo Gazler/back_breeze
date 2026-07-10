@@ -2,6 +2,7 @@ defmodule BackBreeze.Box.BlockLayerMap do
   @moduledoc false
 
   alias BackBreeze.BenchProfile
+  alias BackBreeze.Box.Geometry
   alias BackBreeze.Box.LayerMap
   alias BackBreeze.Box.TextMetrics
 
@@ -43,8 +44,8 @@ defmodule BackBreeze.Box.BlockLayerMap do
   end
 
   defp scrolled_viewport?(box) do
-    match?(width when is_integer(width) and width > 0, resolved_parent_width(box, [])) and
-      match?(height when is_integer(height) and height > 0, resolved_parent_height(box, []))
+    match?(width when is_integer(width) and width > 0, Geometry.resolved_parent_width(box, [])) and
+      match?(height when is_integer(height) and height > 0, Geometry.resolved_parent_height(box, []))
   end
 
   defp scrolled_child_supported?(child) do
@@ -89,9 +90,9 @@ defmodule BackBreeze.Box.BlockLayerMap do
     {total_width, total_height} = children_extent(children)
 
     with viewport_width when is_integer(viewport_width) and viewport_width > 0 <-
-           resolved_parent_width(box, []),
+           Geometry.resolved_parent_width(box, []),
          viewport_height when is_integer(viewport_height) and viewport_height > 0 <-
-           resolved_parent_height(box, []),
+           Geometry.resolved_parent_height(box, []),
          viewport = %{
            scroll_left: scroll_left,
            scroll_top: scroll_top,
@@ -118,7 +119,7 @@ defmodule BackBreeze.Box.BlockLayerMap do
   end
 
   defp absolutize_relative_children(relative, box) do
-    {content_left, content_top} = content_origin(box.style)
+    {content_left, content_top} = Geometry.content_origin(box.style)
 
     Enum.map(relative, fn child ->
       %{
@@ -471,73 +472,5 @@ defmodule BackBreeze.Box.BlockLayerMap do
 
   defp rect_overlaps?({left1, top1, right1, bottom1}, {left2, top2, right2, bottom2}) do
     left1 <= right2 and right1 >= left2 and top1 <= bottom2 and bottom1 >= top2
-  end
-
-  defp resolved_parent_width(%{width: rendered_width, style: style}, _opts)
-       when is_integer(rendered_width) do
-    max(rendered_width - border_horizontal(style.border) - padding_horizontal(style), 0)
-  end
-
-  defp resolved_parent_width(%{style: %{width: width} = style}, opts) do
-    case width do
-      w when is_integer(w) ->
-        max(w - border_horizontal(style.border) - padding_horizontal(style), 0)
-
-      extent when extent in [:screen, :full] ->
-        {screen_width, _screen_height} =
-          BackBreeze.screen_dimensions(Keyword.get(opts, :terminal))
-
-        max(screen_width - border_horizontal(style.border) - padding_horizontal(style), 0)
-
-      _ ->
-        nil
-    end
-  end
-
-  defp resolved_parent_height(%{height: rendered_height, style: style}, _opts)
-       when is_integer(rendered_height) do
-    max(rendered_height - border_vertical(style.border) - padding_vertical(style), 0)
-  end
-
-  defp resolved_parent_height(%{style: %{height: height} = style}, opts) do
-    case height do
-      h when is_integer(h) ->
-        max(h - border_vertical(style.border) - padding_vertical(style), 0)
-
-      extent when extent in [:screen, :full] ->
-        {_screen_width, screen_height} =
-          BackBreeze.screen_dimensions(Keyword.get(opts, :terminal))
-
-        max(screen_height - border_vertical(style.border) - padding_vertical(style), 0)
-
-      _ ->
-        nil
-    end
-  end
-
-  defp border_horizontal(border),
-    do: if(border.left, do: 1, else: 0) + if(border.right, do: 1, else: 0)
-
-  defp border_vertical(border),
-    do: if(border.top, do: 1, else: 0) + if(border.bottom, do: 1, else: 0)
-
-  defp padding_horizontal(style),
-    do: style_value(style, :padding_left) + style_value(style, :padding_right)
-
-  defp padding_vertical(style),
-    do: style_value(style, :padding_top) + style_value(style, :padding_bottom)
-
-  defp content_origin(style) do
-    {
-      if(style.border.left, do: 1, else: 0) + style_value(style, :padding_left),
-      if(style.border.top, do: 1, else: 0) + style_value(style, :padding_top)
-    }
-  end
-
-  defp style_value(style, side_key) do
-    case Map.get(style, side_key) do
-      value when is_integer(value) -> value
-      _ -> Map.get(style, :padding, 0) || 0
-    end
   end
 end

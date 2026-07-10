@@ -1,6 +1,7 @@
 defmodule BackBreeze.Box.LayoutOnly do
   @moduledoc false
 
+  alias BackBreeze.Box.Geometry
   alias BackBreeze.Box.LayerMap
 
   def child_result(child, opts)
@@ -61,23 +62,9 @@ defmodule BackBreeze.Box.LayoutOnly do
   defp layout_only_style?(%BackBreeze.Style{} = style) do
     style.scrollbar == false and
       style.border == BackBreeze.Border.none() and
-      zero_padding?(style) and
+      Geometry.zero_padding?(style) and
       not style.reverse and
       not style.repeat_x and
       not style.repeat_y
-  end
-
-  defp zero_padding?(style) do
-    style_value(style, :padding_left) == 0 and
-      style_value(style, :padding_right) == 0 and
-      style_value(style, :padding_top) == 0 and
-      style_value(style, :padding_bottom) == 0
-  end
-
-  defp style_value(style, side_key) do
-    case Map.get(style, side_key) do
-      value when is_integer(value) -> value
-      _ -> Map.get(style, :padding, 0) || 0
-    end
   end
 end

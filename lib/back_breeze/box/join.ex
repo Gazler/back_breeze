@@ -42,28 +42,7 @@ defmodule BackBreeze.Box.Join do
       Enum.flat_map(items, &:binary.split(&1, "\n", [:global]))
 
     line_count = length(items)
-
-    items =
-      case Keyword.get(opts, :height) do
-        :screen ->
-          {_screen_width, screen_height} =
-            BackBreeze.screen_dimensions(Keyword.get(opts, :terminal))
-
-          height = screen_height
-
-          # TODO: swap X and Y obviously
-          {start_pos, _} = Keyword.get(opts, :scroll, {0, 0})
-          end_pos = height + start_pos - 1
-          Enum.slice(items, start_pos..end_pos//1)
-
-        height when is_integer(height) ->
-          {start_pos, _} = Keyword.get(opts, :scroll, {0, 0})
-          end_pos = height + start_pos - 1
-          Enum.slice(items, start_pos..end_pos//1)
-
-        _ ->
-          items
-      end
+    items = slice_vertical_items(items, opts)
 
     {Enum.join(items, "\n"), max_width, line_count}
   end
