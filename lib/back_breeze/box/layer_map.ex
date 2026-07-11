@@ -14,7 +14,7 @@ defmodule BackBreeze.Box.LayerMap do
     context = %{
       offset_x: offset_x,
       offset_y: offset_y,
-      preserve_plain_spaces?: has_wide_glyphs?(source_map) or map_size(target_map) == 0
+      preserve_plain_spaces?: map_size(target_map) == 0
     }
 
     {map, max_x, max_y} =
@@ -696,13 +696,23 @@ defmodule BackBreeze.Box.LayerMap do
   end
 
   defp rows_to_content(layer_map, bounds) do
-    reset = Termite.Style.reset_code()
-    rows = group_rows(layer_map, bounds)
+    if default_fill_entries(layer_map) == [] do
+      reset = Termite.Style.reset_code()
+      rows = group_rows(layer_map, bounds)
 
-    bounds.start_y..bounds.max_y
-    |> Enum.map(&sparse_row_to_content(&1, rows, bounds, reset))
-    |> Enum.intersperse("\n")
-    |> IO.iodata_to_binary()
+      bounds.start_y..bounds.max_y
+      |> Enum.map(&sparse_row_to_content(&1, rows, bounds, reset))
+      |> Enum.intersperse("\n")
+      |> IO.iodata_to_binary()
+    else
+      dense_rows_to_content(%{
+        bounds: bounds,
+        layer_map: layer_map,
+        overlay?: false,
+        overlay_layer_map: %{},
+        reset: Termite.Style.reset_code()
+      })
+    end
   end
 
   defp sparse_row_to_content(y, rows, bounds, reset) do

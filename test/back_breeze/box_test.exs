@@ -217,6 +217,30 @@ defmodule BackBreeze.BoxTest do
                """
     end
 
+    test "wide content retains parent fills across unstyled gaps" do
+      child =
+        BackBreeze.Box.new(
+          content: "\e[38;5;2mfoo\e[0m  bar\nwide 猫",
+          style: %{width: 18, height: 2, overflow: :hidden}
+        )
+
+      box =
+        BackBreeze.Box.new(
+          style: %{border: :line, width: 20, height: 4, background_color: 4},
+          children: [child]
+        )
+
+      rendered = BackBreeze.Box.render(box)
+
+      assert rendered.content ==
+               """
+               \e[48;5;4m┌──────────────────┐\e[0m
+               \e[48;5;4m│\e[0m\e[48;5;4m\e[38;5;2mfoo\e[0m\e[48;5;4m  \e[0mbar\e[48;5;4m          │\e[0m
+               \e[48;5;4m│wide 猫           │\e[0m
+               \e[48;5;4m└──────────────────┘\e[0m\
+               """
+    end
+
     test "recomposing a rendered wide row keeps repeated wide characters contiguous" do
       row =
         BackBreeze.Box.new(
