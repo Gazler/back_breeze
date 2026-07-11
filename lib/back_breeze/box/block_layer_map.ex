@@ -67,14 +67,15 @@ defmodule BackBreeze.Box.BlockLayerMap do
         result
 
       :error ->
-        %{
-          width: width,
-          height: height,
-          layer_map: layer_map,
-          fixed_layer_map: fixed_layer_map
-        } = BackBreeze.Box.compose_absolute_children_layer_map(children, sorted: true)
+        layout = BackBreeze.Box.compose_absolute_children_layer_map(children, sorted: true)
+        painted = BackBreeze.Box.compose_absolute_children_layer_map(children)
 
-        {width, height, layer_map, fixed_layer_map}
+        {
+          max(layout.width, painted.width),
+          max(layout.height, painted.height),
+          Map.merge(layout.layer_map, painted.layer_map),
+          Map.merge(layout.fixed_layer_map, painted.fixed_layer_map)
+        }
     end
   end
 

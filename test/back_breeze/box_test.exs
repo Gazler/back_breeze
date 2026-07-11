@@ -509,7 +509,7 @@ defmodule BackBreeze.BoxTest do
                """
     end
 
-    test "renders absolute children from a fixed-height child as a parent overlay" do
+    test "absolute children paint beyond a fixed-height child without expanding parent layout" do
       dropdown =
         BackBreeze.Box.new(
           style: %{width: 6, height: 1},
@@ -534,10 +534,118 @@ defmodule BackBreeze.BoxTest do
                ┌──────┐
                │POST  │
                │GET   │
-               │PUT   │
-               │URL   │
-               └──────┘\
+               └PUT───┘\
                """
+    end
+
+    test "fixed-height overlays retain priority over later inline content" do
+      label = BackBreeze.Box.new(content: "Starter", style: %{width: 18, height: 1})
+
+      dropdown =
+        BackBreeze.Box.new(
+          content: " Counter",
+          style: %{width: 32, height: 1},
+          children: [
+            BackBreeze.Box.new(
+              position: :absolute,
+              left: 0,
+              top: 1,
+              layer: 20,
+              style: %{width: 32, height: 2, background_color: 4}
+            ),
+            BackBreeze.Box.new(
+              content: "Counter",
+              position: :absolute,
+              left: 0,
+              top: 1,
+              layer: 21,
+              style: %{width: 32, height: 1, background_color: 4, foreground_color: 0}
+            ),
+            BackBreeze.Box.new(
+              content: "List",
+              position: :absolute,
+              left: 0,
+              top: 2,
+              layer: 21,
+              style: %{width: 32, height: 1, background_color: 4, foreground_color: 0}
+            )
+          ]
+        )
+
+      row =
+        BackBreeze.Box.new(
+          display: :inline,
+          style: %{height: 1},
+          children: [label, dropdown]
+        )
+
+      description =
+        BackBreeze.Box.new(
+          content: String.duplicate(" ", 18) <> "An interactive counter with keyboard controls.",
+          style: %{width: 66, height: 1}
+        )
+
+      spacer = BackBreeze.Box.new(content: "", style: %{width: 66, height: 1})
+      rendered = BackBreeze.Box.render(BackBreeze.Box.new(children: [row, description, spacer]))
+      lines = rendered.content |> BackBreeze.Utils.strip_escape_chars() |> String.split("\n")
+
+      assert Enum.at(lines, 1) =~ String.duplicate(" ", 18) <> "Counter"
+      refute Enum.at(lines, 1) =~ "An interactive"
+      assert Enum.at(lines, 1) =~ "oard controls."
+      assert Enum.at(lines, 2) =~ String.duplicate(" ", 18) <> "List"
+      assert rendered.height == 3
+    end
+
+    test "fixed-height blocks compose flow children by rendered layer" do
+      padding = String.duplicate(" ", 18)
+
+      {open_map, _, _} =
+        BackBreeze.Box.LayerMap.generate(" Counter\n#{padding}Counter", %{}, 0, 0)
+
+      open_dropdown = %{
+        BackBreeze.Box.new(content: "", style: %{width: 50, height: 1})
+        | state: :rendered,
+          width: 50,
+          height: 1,
+          left: 0,
+          top: 0,
+          layer: 24,
+          layer_map: open_map,
+          overlay?: true
+      }
+
+      {description_map, _, _} =
+        BackBreeze.Box.LayerMap.generate(
+          padding <> "An interactive counter with keyboard controls.",
+          %{},
+          0,
+          0
+        )
+
+      description = %{
+        BackBreeze.Box.new(content: "", style: %{width: 66, height: 1})
+        | state: :rendered,
+          width: 66,
+          height: 1,
+          left: 0,
+          top: 1,
+          layer: 0,
+          layer_map: description_map
+      }
+
+      parent = BackBreeze.Box.new(style: %{width: 72, height: 21})
+
+      {_width, _height, layer_map, _fixed_layer_map} =
+        BackBreeze.Box.BlockLayerMap.compose([open_dropdown, description], parent)
+
+      lines =
+        layer_map
+        |> BackBreeze.Box.layer_map_to_content(72, 3)
+        |> BackBreeze.Utils.strip_escape_chars()
+        |> String.split("\n")
+
+      assert Enum.at(lines, 1) =~ padding <> "Counter"
+      refute Enum.at(lines, 1) =~ "An interactive"
     end
 
     test "absolute full-size children fill their parent" do

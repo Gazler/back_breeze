@@ -674,9 +674,6 @@ defmodule BackBreeze.Box do
             (is_integer(box.style.height) and box.style.height <= 0) ->
           max(base_bounds.max_height, child_merge_height)
 
-        context.has_overlay_children? and box.style.height not in [:screen, :full] ->
-          max(base_bounds.max_height, child_merge_height)
-
         true ->
           base_bounds.max_height
       end
