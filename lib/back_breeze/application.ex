@@ -5,11 +5,9 @@ defmodule BackBreeze.Application do
 
   @impl true
   def start(_type, _args) do
-    children = [
-      BackBreeze.RenderCache,
-      BackBreeze.PreparedContentStore
-    ]
-
-    Supervisor.start_link(children, strategy: :one_for_one, name: BackBreeze.Supervisor)
+    Supervisor.start_link(BackBreeze.Cache.children(),
+      strategy: :one_for_one,
+      name: BackBreeze.Supervisor
+    )
   end
 end
