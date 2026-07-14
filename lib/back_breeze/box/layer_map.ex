@@ -28,6 +28,31 @@ defmodule BackBreeze.Box.LayerMap do
     {map, max(max_x, max_x(map)), max(max_y, max_y(map))}
   end
 
+  @doc false
+  def merge_metadata_base(target_map, source_map) do
+    cond do
+      entries?(target_map) ->
+        :error
+
+      true ->
+        source_map =
+          if default_fill_entries(target_map) == [] do
+            source_map
+          else
+            drop_transparent_plain_spaces(source_map)
+          end
+
+        wide_glyphs? = has_wide_glyphs?(target_map) or has_wide_glyphs?(source_map)
+
+        map =
+          source_map
+          |> mark_wide_glyph_metadata(wide_glyphs?)
+          |> merge_default_fills(target_map, source_map, {0, 0})
+
+        {:ok, map}
+    end
+  end
+
   def clear_covered_by_source(target_map, source_map, {offset_x, offset_y}) do
     coverage_rects = layer_map_coverage_rects(source_map, offset_x, offset_y)
 
@@ -193,6 +218,13 @@ defmodule BackBreeze.Box.LayerMap do
   end
 
   defp merge_entry(_entry, acc, _context), do: acc
+
+  defp drop_transparent_plain_spaces(layer_map) do
+    Enum.reduce(layer_map, layer_map, fn
+      {{y, x}, {" ", ""}}, map -> Map.delete(map, {y, x})
+      _entry, map -> map
+    end)
+  end
 
   defp clear_covered_entry({@wide_glyph_key, true}, acc, _coverage_rects),
     do: Map.put(acc, @wide_glyph_key, true)

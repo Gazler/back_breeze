@@ -704,8 +704,14 @@ defmodule BackBreeze.Box do
 
   defp merge_regular_child_layer_map(layer_map, child_layer_map) do
     BenchProfile.measure({__MODULE__, :merge_layer_maps}, fn ->
-      LayerMap.merge(layer_map, child_layer_map, {0, 0})
-      |> elem(0)
+      case LayerMap.merge_metadata_base(layer_map, child_layer_map) do
+        {:ok, map} ->
+          map
+
+        :error ->
+          LayerMap.merge(layer_map, child_layer_map, {0, 0})
+          |> elem(0)
+      end
     end)
   end
 

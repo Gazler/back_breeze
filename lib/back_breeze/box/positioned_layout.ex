@@ -57,14 +57,33 @@ defmodule BackBreeze.Box.PositionedLayout do
   end
 
   def combine_children(box, absolutes, relative, opts) do
-    if CacheKey.combine_children_cacheable?(absolutes) do
-      RenderCache.fetch(CacheKey.combine_children_key(box, absolutes, relative, opts), fn ->
-        do_combine_children(box, absolutes, relative, opts)
-      end)
-    else
-      do_combine_children(box, absolutes, relative, opts)
+    case direct_relative_combine(box, absolutes, relative) do
+      {:ok, result} ->
+        result
+
+      :error ->
+        if CacheKey.combine_children_cacheable?(absolutes) do
+          RenderCache.fetch(CacheKey.combine_children_key(box, absolutes, relative, opts), fn ->
+            do_combine_children(box, absolutes, relative, opts)
+          end)
+        else
+          do_combine_children(box, absolutes, relative, opts)
+        end
     end
   end
+
+  defp direct_relative_combine(box, [], relative) do
+    if Geometry.content_origin(box.style) == {0, 0} and relative.position != :fixed and
+         LayerMap.content?(relative.layer_map) do
+      {:ok,
+       {relative.layer_map, fixed_layer_map(relative), max((relative.width || 0) - 1, 0),
+        max((relative.height || 0) - 1, 0)}}
+    else
+      :error
+    end
+  end
+
+  defp direct_relative_combine(_box, _absolutes, _relative), do: :error
 
   def resolve_fill_size(%{position: position} = child, parent, opts)
       when position in [:absolute, :fixed] do
