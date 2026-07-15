@@ -37,4 +37,15 @@ defmodule BackBreeze.Box.LayerMapTest do
 
     assert :error = LayerMap.merge_metadata_base(base, source)
   end
+
+  test "merges maps without calculating bounds" do
+    base = %{{0, 0} => {"B", "base"}}
+    source = %{{0, 0} => {"A", "text"}, {1, 2} => {"C", "text"}}
+
+    assert LayerMap.merge_map(base, source, {1, 1}) ==
+             source
+             |> Enum.map(fn {{y, x}, value} -> {{y + 1, x + 1}, value} end)
+             |> Map.new()
+             |> Map.put({0, 0}, {"B", "base"})
+  end
 end

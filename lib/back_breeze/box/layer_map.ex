@@ -8,6 +8,17 @@ defmodule BackBreeze.Box.LayerMap do
   @default_fill_key :__default_fill__
 
   def merge(target_map, source_map, {offset_x, offset_y}) do
+    {map, max_x, max_y} = do_merge(target_map, source_map, {offset_x, offset_y})
+    {map, max(max_x, max_x(map)), max(max_y, max_y(map))}
+  end
+
+  @doc false
+  def merge_map(target_map, source_map, {offset_x, offset_y}) do
+    {map, _max_x, _max_y} = do_merge(target_map, source_map, {offset_x, offset_y})
+    map
+  end
+
+  defp do_merge(target_map, source_map, {offset_x, offset_y}) do
     target_map = clear_fill_covered_cells(target_map, source_map, offset_x, offset_y)
     wide_glyphs? = has_wide_glyphs?(target_map) or has_wide_glyphs?(source_map)
 
@@ -25,7 +36,7 @@ defmodule BackBreeze.Box.LayerMap do
       |> mark_wide_glyph_metadata(wide_glyphs?)
       |> merge_default_fills(target_map, source_map, {offset_x, offset_y})
 
-    {map, max(max_x, max_x(map)), max(max_y, max_y(map))}
+    {map, max_x, max_y}
   end
 
   @doc false
@@ -605,9 +616,11 @@ defmodule BackBreeze.Box.LayerMap do
     else
       dense_rows_to_content(%{
         bounds: bounds,
+        fills: default_fill_entries(layer_map),
         layer_map: layer_map,
         overlay?: false,
         overlay_layer_map: overlay_layer_map,
+        overlay_fills: [],
         reset: Termite.Style.reset_code()
       })
     end
@@ -620,9 +633,11 @@ defmodule BackBreeze.Box.LayerMap do
     else
       dense_rows_to_content(%{
         bounds: bounds,
+        fills: default_fill_entries(layer_map),
         layer_map: layer_map,
         overlay?: true,
         overlay_layer_map: overlay_layer_map,
+        overlay_fills: default_fill_entries(overlay_layer_map),
         reset: Termite.Style.reset_code()
       })
     end
@@ -652,22 +667,22 @@ defmodule BackBreeze.Box.LayerMap do
 
   defp dense_cell_point(_x, _y, true, %{overlay?: false}), do: {:skip, false}
 
-  defp dense_cell_point(x, y, _skip, %{layer_map: layer_map, overlay?: false}) do
-    point = Map.get(layer_map, {y, x}) || default_fill_at(layer_map, y, x)
+  defp dense_cell_point(x, y, _skip, %{fills: fills, layer_map: layer_map, overlay?: false}) do
+    point = Map.get(layer_map, {y, x}) || default_fill_at(fills, y, x)
     {point, wide_point?(point)}
   end
 
   defp dense_cell_point(x, y, skip, %{overlay?: true} = context) do
     overlay_point =
       Map.get(context.overlay_layer_map, {y, x}) ||
-        default_fill_at(context.overlay_layer_map, y, x)
+        default_fill_at(context.overlay_fills, y, x)
 
     point =
       if skip do
         overlay_point
       else
         overlay_point || Map.get(context.layer_map, {y, x}) ||
-          default_fill_at(context.layer_map, y, x)
+          default_fill_at(context.fills, y, x)
       end
 
     {point, wide_point?(overlay_point)}
@@ -715,6 +730,12 @@ defmodule BackBreeze.Box.LayerMap do
     |> Enum.reverse()
   end
 
+  defp wide_point?({<<char>>, _style}) when char < 128, do: false
+
+  defp wide_point?({<<codepoint::utf8>>, _style})
+       when codepoint in 0x2500..0x259F or codepoint in 0x25A0..0x25FF,
+       do: false
+
   defp wide_point?({char, _style}), do: Ucwidth.width(char) == 2
   defp wide_point?(_point), do: false
 
@@ -739,9 +760,11 @@ defmodule BackBreeze.Box.LayerMap do
     else
       dense_rows_to_content(%{
         bounds: bounds,
+        fills: default_fill_entries(layer_map),
         layer_map: layer_map,
         overlay?: false,
         overlay_layer_map: %{},
+        overlay_fills: [],
         reset: Termite.Style.reset_code()
       })
     end
@@ -843,8 +866,8 @@ defmodule BackBreeze.Box.LayerMap do
   defp maybe_mark_wide_glyph(map, width) when width > 1, do: Map.put(map, @wide_glyph_key, true)
   defp maybe_mark_wide_glyph(map, _width), do: map
 
-  defp default_fill_at(layer_map, y, x) do
-    Enum.find_value(default_fill_entries(layer_map), fn
+  defp default_fill_at(fills, y, x) do
+    Enum.find_value(fills, fn
       {{_char, _style} = point, left, top, right, bottom}
       when x >= left and x <= right and y >= top and y <= bottom ->
         point
