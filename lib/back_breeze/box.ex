@@ -433,14 +433,18 @@ defmodule BackBreeze.Box do
   defp render_regular_child_container(acc, box, context) do
     extent = regular_child_container_extent(box.style, context)
     style = %{box.style | width: extent.width, height: extent.height}
-    {content, dimensions, _width} = render_child_container_self(box, style, context)
+
+    {content, dimensions, rendered_width} = render_child_container_self(box, style, context)
+
     border_rows = border_row_count(box.style.border)
 
     dimensions =
       regular_child_container_dimensions(dimensions, context, extent.width, border_rows)
 
     acc = %{acc | dimensions: [{context.prev_id, dimensions} | acc.dimensions], id: acc.id}
-    layer_result = regular_child_container_layer_result(box, content, dimensions, context)
+
+    layer_result = regular_child_container_layer_result(box, content, rendered_width, dimensions, context)
+
     content = regular_child_container_content(box, layer_result, context)
 
     box = %{
@@ -548,9 +552,7 @@ defmodule BackBreeze.Box do
     end
   end
 
-  defp regular_child_container_layer_result(box, content, dimensions, context) do
-    rendered_width = raw_content_width(content)
-
+  defp regular_child_container_layer_result(box, content, rendered_width, dimensions, context) do
     base_layer_context = %{
       content: content,
       rendered_width: rendered_width,
@@ -559,8 +561,9 @@ defmodule BackBreeze.Box do
 
     base_layer = regular_child_container_base_layer(box, context, base_layer_context)
 
-    max_height = max(base_layer.max_height, max(rendered_height(content) - 1, 0))
+    max_height = max(base_layer.max_height, max(dimensions.height - 1, 0))
     child_layer_map = scrolled_child_layer_map(context.rendered_child.content, box.scroll)
+
     base_bounds = %{max_width: base_layer.max_width, max_height: max_height}
 
     child_layer_map =
@@ -709,8 +712,7 @@ defmodule BackBreeze.Box do
           map
 
         :error ->
-          LayerMap.merge(layer_map, child_layer_map, {0, 0})
-          |> elem(0)
+          LayerMap.merge_map(layer_map, child_layer_map, {0, 0})
       end
     end)
   end
