@@ -324,6 +324,28 @@ defmodule BackBreeze.BoxTest do
                """
     end
 
+    test "preserves empty fixed-width children in inline layouts" do
+      box =
+        BackBreeze.Box.new(
+          display: :inline,
+          children: [
+            BackBreeze.Box.new(content: "Left"),
+            BackBreeze.Box.new(style: %{width: 2}),
+            BackBreeze.Box.new(content: "Right")
+          ]
+        )
+
+      %{
+        box: rendered,
+        dimensions: [_root, _left, spacer, right]
+      } = BackBreeze.Box.render_with_dimensions(box)
+
+      assert rendered.content == "Left  Right"
+      assert rendered.width == 11
+      assert %{left: 4, width: 2} = spacer
+      assert %{left: 6} = right
+    end
+
     test "uses remaining width for width-full children in inline layout" do
       box =
         BackBreeze.Box.new(

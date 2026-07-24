@@ -1101,7 +1101,14 @@ defmodule BackBreeze.Box do
 
     child_result =
       BenchProfile.measure({__MODULE__, :flow_child_render}, fn ->
-        LayoutOnly.child_result(child, context.opts) ||
+        layout_opts =
+          if context.display == :inline do
+            Keyword.put(context.opts, :structured, true)
+          else
+            context.opts
+          end
+
+        LayoutOnly.child_result(child, layout_opts) ||
           render_cached_with_dimensions(child,
             structured: true,
             terminal: Keyword.get(context.opts, :terminal)
@@ -1198,7 +1205,7 @@ defmodule BackBreeze.Box do
 
         {nil, width, height, layer_map, fixed_layer_map}
       else
-        items = Enum.map(context.relative, &materialized_content(&1))
+        items = Enum.map(context.relative, &materialized_flow_content(&1, box.display))
 
         {content, width, height} =
           case box.display do
@@ -1527,6 +1534,19 @@ defmodule BackBreeze.Box do
   defp materialized_content(%{layer_map: layer_map, width: width, height: height}) do
     layer_map_to_content(layer_map, width, height)
   end
+
+  defp materialized_flow_content(box, :inline) do
+    case {materialized_content(box), box.width} do
+      {"", width} when is_integer(width) and width > 0 ->
+        String.duplicate(" ", width)
+
+      {content, _width} ->
+        content
+    end
+  end
+
+  defp materialized_flow_content(box, _display),
+    do: materialized_content(box)
 
   defp shift_dimension(dims, left_offset, top_offset) do
     dims
