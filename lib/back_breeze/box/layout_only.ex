@@ -11,7 +11,9 @@ defmodule BackBreeze.Box.LayoutOnly do
     with true <- Keyword.get(opts, :structured, false),
          true <- layout_only_style?(style),
          width when is_integer(width) <- layout_only_dimension(child.width, style.width),
-         height when is_integer(height) <- layout_only_dimension(child.height, style.height) do
+         height when is_integer(height) <-
+           layout_only_dimension(child.height, style.height)
+           |> BackBreeze.Style.constrain_height(style.max_height) do
       dimension = %{
         width: width,
         viewport_width: width,

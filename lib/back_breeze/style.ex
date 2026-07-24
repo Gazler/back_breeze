@@ -24,6 +24,7 @@ defmodule BackBreeze.Style do
             text_align: :left,
             width: :auto,
             height: 0,
+            max_height: nil,
             overflow: :auto,
             scrollbar: false,
             border_color: nil,
@@ -95,6 +96,18 @@ defmodule BackBreeze.Style do
   def height(style \\ %Style{}, height) do
     %{style | height: height}
   end
+
+  def max_height(style \\ %Style{}, max_height) do
+    %{style | max_height: max_height}
+  end
+
+  @doc false
+  def constrain_height(height, max_height)
+      when is_integer(height) and is_integer(max_height) and max_height >= 0 do
+    min(height, max_height)
+  end
+
+  def constrain_height(height, _max_height), do: height
 
   def border(style \\ %Style{}) do
     %{style | border: BackBreeze.Border.line()}
@@ -207,9 +220,10 @@ defmodule BackBreeze.Style do
     padding_left = if(is_integer(padding_left), do: padding_left, else: padding)
     {width, style} = Map.pop(style, :width, :auto)
     {height, style} = Map.pop(style, :height, :auto)
+    {max_height, style} = Map.pop(style, :max_height)
 
     auto_width = width == :auto
-    auto_height = height == :auto
+    intrinsic_height = height in [:auto, 0]
     {string_length, intrinsic_width} = cached_source_metrics(source)
 
     border_width = if(border.left, do: 1, else: 0) + if(border.right, do: 1, else: 0)
@@ -235,7 +249,14 @@ defmodule BackBreeze.Style do
       end
 
     height =
-      if is_integer(height) and not auto_height,
+      if intrinsic_height and is_integer(max_height) and max_height >= 0 do
+        max_height
+      else
+        constrain_height(height, max_height)
+      end
+
+    height =
+      if is_integer(height) and (not intrinsic_height or is_integer(max_height)),
         do: max(height - border_height - padding_top - padding_bottom, 0),
         else: height
 
@@ -285,7 +306,7 @@ defmodule BackBreeze.Style do
 
     line_count = length(lines)
     inner_width = padding_left + width + padding_right
-    padding_row_count = max(height - line_count, 0)
+    padding_row_count = if intrinsic_height, do: 0, else: max(height - line_count, 0)
 
     layer_map =
       maybe_styled_layer_map(%{

@@ -6,11 +6,13 @@ defmodule BackBreeze.StyleTest do
       style =
         BackBreeze.Style.bold()
         |> BackBreeze.Style.width(17)
+        |> BackBreeze.Style.max_height(12)
         |> BackBreeze.Style.border()
         |> BackBreeze.Style.foreground_color(3)
 
       assert style.bold
       assert style.width == 17
+      assert style.max_height == 12
       assert style.border == BackBreeze.Border.line()
       assert style.foreground_color == 3
     end
@@ -99,6 +101,41 @@ defmodule BackBreeze.StyleTest do
 
       assert dimensions.height == 4
       assert output |> String.split("\n") |> hd() |> String.length() == 10
+    end
+
+    test "caps full height without padding intrinsic content to max height" do
+      terminal = %Termite.Terminal{size: %{width: 10, height: 6}}
+
+      full_style =
+        BackBreeze.Style.height(:full)
+        |> BackBreeze.Style.max_height(3)
+        |> BackBreeze.Style.width(4)
+
+      intrinsic_style =
+        BackBreeze.Style.max_height(3)
+        |> BackBreeze.Style.width(4)
+        |> BackBreeze.Style.overflow(:hidden)
+
+      {full_output, full_dimensions} =
+        BackBreeze.Style.calculate_and_render(full_style, "x", terminal: terminal)
+
+      {short_output, short_dimensions} =
+        BackBreeze.Style.calculate_and_render(intrinsic_style, "x", terminal: terminal)
+
+      {long_output, long_dimensions} =
+        BackBreeze.Style.calculate_and_render(
+          intrinsic_style,
+          "1\n2\n3\n4",
+          terminal: terminal
+        )
+
+      assert String.split(full_output, "\n") == ["x   ", "    ", "    "]
+      assert full_dimensions.height == 3
+      assert short_output == "x   "
+      assert short_dimensions.height == 1
+      assert String.split(long_output, "\n") == ["1   ", "2   ", "3   "]
+      assert long_dimensions.height == 3
+      assert long_dimensions.content_height == 4
     end
 
     test "renders padding rows with background styling" do

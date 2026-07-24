@@ -94,7 +94,9 @@ defmodule BackBreeze.Box.PositionedLayout do
       constrained_overlay_extent(child.style.width, child.left, child.right, container_width)
 
     height =
-      constrained_overlay_extent(child.style.height, child.top, child.bottom, container_height)
+      child.style.height
+      |> constrained_overlay_extent(child.top, child.bottom, container_height)
+      |> BackBreeze.Style.constrain_height(child.style.max_height)
 
     style =
       child.style

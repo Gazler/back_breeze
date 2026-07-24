@@ -21,6 +21,18 @@ defmodule BackBreeze.GridTest do
                BackBreeze.Grid.precompute(items, %Grid{columns: 3}, style, terminal: terminal)
     end
 
+    test "caps screen height before computing row tracks" do
+      terminal = %Termite.Terminal{size: %{width: 30, height: 20}}
+      items = ["Foo", "Bar", "Baz"]
+
+      style =
+        %BackBreeze.Style{width: :screen, height: :screen, max_height: 10}
+        |> BackBreeze.Style.border()
+
+      assert %{width: 9, height: 8} =
+               BackBreeze.Grid.precompute(items, %Grid{columns: 3}, style, terminal: terminal)
+    end
+
     test "allows an explicit width/height" do
       terminal = %Termite.Terminal{size: %{width: 30, height: 20}}
       items = ["Foo", "Bar", "Baz"]

@@ -23,6 +23,7 @@ defmodule BackBreeze.Box.CacheKey do
       box.height,
       box.style.width,
       box.style.height,
+      box.style.max_height,
       if(terminal, do: terminal.size, else: nil),
       rendered_key(relative),
       Enum.map(absolutes, &rendered_key/1)

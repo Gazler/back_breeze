@@ -66,6 +66,28 @@ defmodule BackBreeze.BoxTest do
   end
 
   describe "render/1" do
+    test "caps full-height child containers" do
+      children =
+        Enum.map(1..6, fn row ->
+          BackBreeze.Box.new(content: Integer.to_string(row), style: %{height: 1})
+        end)
+
+      box =
+        BackBreeze.Box.new(
+          children: children,
+          style: %{width: 4, height: :full, max_height: 3, overflow: :hidden}
+        )
+
+      rendered =
+        BackBreeze.Box.render(
+          box,
+          terminal: %Termite.Terminal{size: %{width: 10, height: 8}}
+        )
+
+      assert rendered.height == 3
+      assert BackBreeze.Utils.strip_escape_chars(rendered.content) == "1   \n2   \n3   "
+    end
+
     test "renders a single child" do
       child = BackBreeze.Box.new(content: "Hello", style: %{bold: true})
       box = BackBreeze.Box.new(children: [child])

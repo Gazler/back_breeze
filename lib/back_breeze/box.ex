@@ -491,19 +491,23 @@ defmodule BackBreeze.Box do
   defp regular_child_container_height(style, children_content_height) do
     style_height = if style.height == :auto, do: 0, else: style.height
 
-    cond do
-      style.overflow == :hidden and is_integer(style.height) and style.height > 0 ->
-        style.height
+    height =
+      cond do
+        style.overflow == :hidden and is_integer(style.height) and style.height > 0 ->
+          style.height
 
-      is_integer(style.height) and style.height > 0 ->
-        style.height
+        is_integer(style.height) and style.height > 0 ->
+          style.height
 
-      true ->
-        max(
-          style_height,
-          children_content_height + Geometry.padding_vertical(style) + Geometry.border_vertical(style.border)
-        )
-    end
+        true ->
+          max(
+            style_height,
+            children_content_height + Geometry.padding_vertical(style) +
+              Geometry.border_vertical(style.border)
+          )
+      end
+
+    BackBreeze.Style.constrain_height(height, style.max_height)
   end
 
   defp render_child_container_self(box, style, context) do
@@ -540,7 +544,9 @@ defmodule BackBreeze.Box do
 
     if style.height in [:auto, :full] ||
          (is_integer(style.height) and style.height <= 0 and style.width != :screen) do
-      resolved_height = max(dimensions.height, dimensions.content_height)
+      resolved_height =
+        max(dimensions.height, dimensions.content_height)
+        |> BackBreeze.Style.constrain_height(style.max_height)
 
       %{
         dimensions
@@ -654,7 +660,9 @@ defmodule BackBreeze.Box do
 
   defp clip_regular_child_layer_map?(style, context) do
     style.overflow == :hidden ||
-      (is_integer(style.height) and style.height > 0 and not context.has_overlay_children?)
+      (((is_integer(style.height) and style.height > 0) or
+          (is_integer(style.max_height) and style.max_height >= 0)) and
+         not context.has_overlay_children?)
   end
 
   defp regular_child_container_bounds(box, child_layer_map, base_bounds, context) do
@@ -671,6 +679,9 @@ defmodule BackBreeze.Box do
     max_height =
       cond do
         box.style.overflow == :hidden ->
+          base_bounds.max_height
+
+        is_integer(box.style.max_height) and box.style.max_height >= 0 ->
           base_bounds.max_height
 
         box.style.height in [:auto, :full] ||
@@ -867,14 +878,17 @@ defmodule BackBreeze.Box do
   defp wrapped_content_height(style, child_height) do
     style_height = if style.height == :auto, do: 0, else: style.height
 
-    if is_integer(style.height) and style.height > 0 do
-      style.height
-    else
-      max(
-        style_height,
-        child_height + Geometry.padding_vertical(style) + Geometry.border_vertical(style.border)
-      )
-    end
+    height =
+      if is_integer(style.height) and style.height > 0 do
+        style.height
+      else
+        max(
+          style_height,
+          child_height + Geometry.padding_vertical(style) + Geometry.border_vertical(style.border)
+        )
+      end
+
+    BackBreeze.Style.constrain_height(height, style.max_height)
   end
 
   defp render_self(box, opts) do
@@ -1150,6 +1164,20 @@ defmodule BackBreeze.Box do
         box.style.height
       end
 
+    resolved_join_height =
+      case {resolved_join_height, box.style.max_height} do
+        {height, max_height}
+        when is_integer(max_height) and max_height >= 0 and
+               (is_integer(height) or height in [:auto, :full, :screen]) ->
+          BackBreeze.Style.constrain_height(
+            if(is_integer(height), do: height, else: max_height),
+            max_height
+          )
+
+        _ ->
+          resolved_join_height
+      end
+
     opts
     |> Keyword.put(:height, resolved_join_height)
     |> Keyword.put(:scroll, box.scroll)
@@ -1385,7 +1413,11 @@ defmodule BackBreeze.Box do
 
   defp resolve_fill_height(child, :inline, parent_height, _used_height) do
     if child.style.height in [:full, :screen] do
-      %{child | style: %{child.style | height: max(0, parent_height)}}
+      height =
+        max(0, parent_height)
+        |> BackBreeze.Style.constrain_height(child.style.max_height)
+
+      %{child | style: %{child.style | height: height}}
     else
       child
     end
@@ -1396,7 +1428,12 @@ defmodule BackBreeze.Box do
       child
     else
       used_height = if PositionedLayout.overlay?(child), do: 0, else: used_height
-      %{child | style: %{child.style | height: max(0, parent_height - used_height)}}
+
+      height =
+        max(0, parent_height - used_height)
+        |> BackBreeze.Style.constrain_height(child.style.max_height)
+
+      %{child | style: %{child.style | height: height}}
     end
   end
 
@@ -1671,6 +1708,7 @@ defmodule BackBreeze.Box do
            padding_bottom: nil,
            padding_left: nil,
            reverse: false,
+           max_height: nil,
            border: border,
            overflow: :auto,
            scrollbar: false,
@@ -1698,6 +1736,7 @@ defmodule BackBreeze.Box do
            padding_bottom: nil,
            padding_left: nil,
            reverse: false,
+           max_height: nil,
            border: border,
            overflow: :hidden,
            scrollbar: false,

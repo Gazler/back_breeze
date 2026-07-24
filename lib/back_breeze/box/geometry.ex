@@ -28,15 +28,24 @@ defmodule BackBreeze.Box.Geometry do
   end
 
   def resolved_parent_height(%{style: %{height: height} = style}, opts) do
-    case height do
+    resolved_height =
+      case height do
+        height when is_integer(height) ->
+          height
+
+        extent when extent in [:screen, :full] ->
+          {_screen_width, screen_height} =
+            BackBreeze.screen_dimensions(Keyword.get(opts, :terminal))
+
+          screen_height
+
+        _ ->
+          nil
+      end
+
+    case BackBreeze.Style.constrain_height(resolved_height, style.max_height) do
       height when is_integer(height) ->
         max(height - border_vertical(style.border) - padding_vertical(style), 0)
-
-      extent when extent in [:screen, :full] ->
-        {_screen_width, screen_height} =
-          BackBreeze.screen_dimensions(Keyword.get(opts, :terminal))
-
-        max(screen_height - border_vertical(style.border) - padding_vertical(style), 0)
 
       _ ->
         nil

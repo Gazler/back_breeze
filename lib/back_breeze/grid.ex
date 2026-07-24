@@ -40,6 +40,7 @@ defmodule BackBreeze.Grid do
         height when height in @auto_sizes -> screen_height
         other -> other
       end
+      |> BackBreeze.Style.constrain_height(style.max_height)
 
     height_offset =
       if(style.border.top, do: 1, else: 0) +
@@ -165,6 +166,7 @@ defmodule BackBreeze.Grid do
         h when is_integer(h) and h > 0 -> max(h - height_offset, 0)
         _ -> screen_height - height_offset
       end
+      |> constrain_total_height(style, height_offset)
 
     gap_x = max(grid.gap_x || 0, 0)
     gap_y = max(grid.gap_y || 0, 0)
@@ -291,7 +293,12 @@ defmodule BackBreeze.Grid do
     %{
       content: content,
       width: resolved_extent(style.width, total_width, rendered_width),
-      height: resolved_extent(style.height, total_height, rendered_height),
+      height:
+        resolved_extent(
+          BackBreeze.Style.constrain_height(style.height, style.max_height),
+          total_height,
+          rendered_height
+        ),
       content_width: rendered_width,
       content_height: rendered_height,
       per_item_dimensions: per_item_dimensions,
@@ -331,6 +338,7 @@ defmodule BackBreeze.Grid do
         h when is_integer(h) and h > 0 -> max(h - height_offset, 0)
         _ -> screen_height - height_offset
       end
+      |> constrain_total_height(style, height_offset)
 
     row_heights =
       BenchProfile.measure({__MODULE__, :tracks}, fn ->
@@ -413,7 +421,12 @@ defmodule BackBreeze.Grid do
     %{
       content: content,
       width: resolved_extent(style.width, total_width, rendered_width),
-      height: resolved_extent(style.height, total_height, rendered_height),
+      height:
+        resolved_extent(
+          BackBreeze.Style.constrain_height(style.height, style.max_height),
+          total_height,
+          rendered_height
+        ),
       content_width: rendered_width,
       content_height: rendered_height,
       per_item_dimensions: per_item_dimensions,
@@ -430,6 +443,13 @@ defmodule BackBreeze.Grid do
       true -> rendered || total
     end
   end
+
+  defp constrain_total_height(total_height, %{max_height: max_height}, height_offset)
+       when is_integer(max_height) and max_height >= 0 do
+    min(total_height, max(max_height - height_offset, 0))
+  end
+
+  defp constrain_total_height(total_height, _style, _height_offset), do: total_height
 
   defp compose_grid_children(
          rendered_flow_children,
