@@ -56,6 +56,15 @@ IO.puts(box.content)
 BackBreeze keeps the public surface small. Most rendering starts with
 `BackBreeze.Box.new/1` and ends with `BackBreeze.Box.render/2`.
 
+The default render cache is bounded in bytes at runtime. Its limit is 70% of
+the memory reported as available by OTP's memory supervisor when BackBreeze
+starts, up to 1 GiB. Set an explicit limit when automatic detection is not
+appropriate:
+
+```elixir
+config :back_breeze, render_cache_max_memory_bytes: 32 * 1_024 * 1_024
+```
+
 Core layout features include:
 
 * borders, padding, colors, and text styling

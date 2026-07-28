@@ -25,9 +25,9 @@ defmodule BackBreeze.Cache do
   @callback clear(cache_scope()) :: :ok
   @callback size(cache_scope()) :: non_neg_integer()
   @callback advance_generation() :: :ok
-  @callback max_memory_words() :: non_neg_integer()
+  @callback max_memory_bytes() :: non_neg_integer()
 
-  @optional_callbacks max_memory_words: 0
+  @optional_callbacks max_memory_bytes: 0
 
   @doc false
   def backend, do: @backend
@@ -51,9 +51,9 @@ defmodule BackBreeze.Cache do
   def advance_generation, do: @backend.advance_generation()
 
   @doc false
-  def max_memory_words do
-    if function_exported?(@backend, :max_memory_words, 0) do
-      @backend.max_memory_words()
+  def max_memory_bytes do
+    if function_exported?(@backend, :max_memory_bytes, 0) do
+      @backend.max_memory_bytes()
     else
       0
     end

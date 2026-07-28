@@ -29,5 +29,5 @@ defmodule BackBreeze.Cache.Default do
   def advance_generation, do: RenderCache.advance_generation()
 
   @impl true
-  def max_memory_words, do: RenderCache.max_memory_words()
+  def max_memory_bytes, do: RenderCache.max_memory_bytes()
 end

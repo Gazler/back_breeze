@@ -3,6 +3,7 @@ defmodule BackBreeze.RenderCacheTest do
 
   alias BackBreeze.Box
   alias BackBreeze.RenderCache
+  alias BackBreeze.RenderCache.Default
 
   setup do
     RenderCache.clear()
@@ -80,7 +81,11 @@ defmodule BackBreeze.RenderCacheTest do
       end)
 
     assert stable_keys != []
-    assert :ets.info(:back_breeze_render_cache, :memory) < RenderCache.max_memory_words()
+
+    memory_bytes =
+      :ets.info(:back_breeze_render_cache, :memory) * :erlang.system_info(:wordsize)
+
+    assert memory_bytes < RenderCache.max_memory_bytes()
   end
 
   test "resets the cache once it reaches the memory limit" do
@@ -100,5 +105,16 @@ defmodule BackBreeze.RenderCacheTest do
       end)
 
     assert is_integer(reset_size)
+  end
+
+  test "sets the automatic limit to 70 percent of available memory" do
+    gibibyte = 1_024 * 1_024 * 1_024
+
+    assert Default.limit_for_available_memory(100_000_000) == 70_000_000
+    assert Default.limit_for_available_memory(8 * gibibyte) == gibibyte
+  end
+
+  test "reports the configured limit in bytes" do
+    assert RenderCache.max_memory_bytes() == 4 * 1_024 * 1_024
   end
 end

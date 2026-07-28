@@ -17,7 +17,7 @@ defmodule BackBreeze.RenderCache do
   def size, do: BackBreeze.Cache.size(:render)
 
   @doc false
-  def max_memory_words, do: BackBreeze.Cache.max_memory_words()
+  def max_memory_bytes, do: BackBreeze.Cache.max_memory_bytes()
 
   def advance_generation, do: BackBreeze.Cache.advance_generation()
 end
