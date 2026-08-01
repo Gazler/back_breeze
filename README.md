@@ -56,13 +56,35 @@ IO.puts(box.content)
 BackBreeze keeps the public surface small. Most rendering starts with
 `BackBreeze.Box.new/1` and ends with `BackBreeze.Box.render/2`.
 
-The default render cache is bounded in bytes at runtime. Its limit is 70% of
-the memory reported as available by OTP's memory supervisor when BackBreeze
-starts, up to 1 GiB. Set an explicit limit when automatic detection is not
-appropriate:
+The default render cache is bounded in bytes at runtime. When OTP's memory
+supervisor is available, its limit is 70% of the reported available memory, up
+to 1 GiB. BackBreeze does not start host-wide OS monitoring itself. Add
+`:os_mon` to your application's `extra_applications` to enable automatic
+sizing:
 
 ```elixir
-config :back_breeze, render_cache_max_memory_bytes: 32 * 1_024 * 1_024
+def application do
+  [
+    extra_applications: [:logger, :os_mon]
+  ]
+end
+```
+
+If you only need memory information, you can prevent `os_mon` from starting
+its disk and CPU supervisors:
+
+```elixir
+config :os_mon,
+  start_cpu_sup: false,
+  start_disksup: false
+```
+
+Without `:os_mon`, BackBreeze logs a warning and uses a conservative 256 MiB
+limit. Set an explicit limit to use a different value and suppress that
+warning:
+
+```elixir
+config :back_breeze, render_cache_max_memory_bytes: 256 * 1_024 * 1_024
 ```
 
 Core layout features include:

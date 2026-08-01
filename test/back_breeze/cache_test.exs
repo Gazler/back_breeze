@@ -9,4 +9,8 @@ defmodule BackBreeze.CacheTest do
              BackBreeze.PreparedContentStore.Default
            ]
   end
+
+  test "does not start host-wide OS monitoring" do
+    refute :os_mon in Application.spec(:back_breeze, :applications)
+  end
 end

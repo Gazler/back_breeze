@@ -1,3 +1,26 @@
+## [0.4.2] - 2026-07-30
+
+### Features
+
+- *(BackBreeze.Cache)* Support configurable cache backends ([eb30f8c](https://github.com/gazler/breeze/commit/eb30f8ca56091cd021084539e3ae093fe574c928))
+- *(BackBreeze.Style)* Support max height contstraints ([87bce2e](https://github.com/gazler/breeze/commit/87bce2eae34332cdf9faccc086fb301aa273f3ca))
+
+### Bug Fixes
+
+- *(BackBreeze.Box.LayerMap)* Ensure parent fill works with unicode ([4b4bc8e](https://github.com/gazler/breeze/commit/4b4bc8e205396fe9b78d339e522aab14954716d5))
+- *(BackBreeze.Box)* Preserve overlays beyond fixed-height bounds ([b16fa20](https://github.com/gazler/breeze/commit/b16fa209045c278bf32b683b439417a9235bb1fe))
+- *(BackBreeze.Ucwidth)* Fallback to unicode_width if prim_tty missing ([73f403a](https://github.com/gazler/breeze/commit/73f403ac5d6678356a48948366e1bc2649e890fe))
+- *(BackBreeze.Box)* Ensure that empty inline space is reserved ([766c871](https://github.com/gazler/breeze/commit/766c87148a919a0e38c50f8a938ff1384d999627))
+- *(BackBreeze.RenderCache)* Size cache from available memory ([f1b12f6](https://github.com/gazler/breeze/commit/f1b12f6cfaa418da7809757398a767b715227ef3))
+
+### Refactor
+
+- *(BackBreeze.Box)* Extract layout concerns and streamline caching ([4955447](https://github.com/gazler/breeze/commit/49554474a2830829a33ba51039cf77aefd455fc4))
+
+### Performance
+
+- *(BackBreeze.Box.LayerMap)* Optimize composition ([1df66d8](https://github.com/gazler/breeze/commit/1df66d81913402d0263736b99d40f7723162cc11))
+- *(BackBreeze.Box)* Avoid redundant layer map scans ([3046b7d](https://github.com/gazler/breeze/commit/3046b7dbc295f3ef955bd0c4cb7ddfcfed0d1c93))
 ## [0.4.1] - 2026-07-09
 
 ### Bug Fixes

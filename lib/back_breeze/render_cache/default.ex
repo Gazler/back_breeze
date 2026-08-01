@@ -3,11 +3,10 @@ defmodule BackBreeze.RenderCache.Default do
 
   use GenServer
 
+  alias BackBreeze.RenderCache.MemoryLimit
+
   @table :back_breeze_render_cache
   @max_entries 4_096
-  @maximum_memory_bytes 1_024 * 1_024 * 1_024
-  @memory_ratio_numerator 7
-  @memory_ratio_denominator 10
   @max_memory_bytes_key {__MODULE__, :max_memory_bytes}
   @generation_key {__MODULE__, :generation_counter}
   @frame_depth_key {__MODULE__, :frame_depth}
@@ -83,11 +82,7 @@ defmodule BackBreeze.RenderCache.Default do
 
   @doc false
   def limit_for_available_memory(bytes) when is_integer(bytes) and bytes >= 0 do
-    bytes
-    |> Kernel.*(@memory_ratio_numerator)
-    |> div(@memory_ratio_denominator)
-    |> min(@maximum_memory_bytes)
-    |> max(1)
+    MemoryLimit.limit_for_available_memory(bytes)
   end
 
   def advance_generation do
@@ -216,42 +211,8 @@ defmodule BackBreeze.RenderCache.Default do
   end
 
   defp put_max_memory_bytes do
-    bytes = resolve_max_memory_bytes()
+    bytes = MemoryLimit.resolve()
     :persistent_term.put(@max_memory_bytes_key, bytes)
     bytes
-  end
-
-  defp resolve_max_memory_bytes do
-    case Application.get_env(:back_breeze, :render_cache_max_memory_bytes, :auto) do
-      :auto ->
-        available_memory_bytes() |> limit_for_available_memory()
-
-      bytes when is_integer(bytes) and bytes > 0 ->
-        bytes
-
-      value ->
-        raise ArgumentError,
-              ":back_breeze, :render_cache_max_memory_bytes must be :auto or a positive integer, got: #{inspect(value)}"
-    end
-  end
-
-  defp available_memory_bytes do
-    case Keyword.get(:memsup.get_system_memory_data(), :available_memory) do
-      bytes when is_integer(bytes) and bytes >= 0 -> bytes
-      _other -> available_memory_from_summary()
-    end
-  catch
-    :exit, _reason -> fallback_available_memory()
-  end
-
-  defp available_memory_from_summary do
-    case :memsup.get_memory_data() do
-      {total, allocated, _worst} when total > 0 -> max(total - allocated, 0)
-      _other -> fallback_available_memory()
-    end
-  end
-
-  defp fallback_available_memory do
-    div(@maximum_memory_bytes * @memory_ratio_denominator, @memory_ratio_numerator) + 1
   end
 end
