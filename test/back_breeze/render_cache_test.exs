@@ -1,9 +1,12 @@
 defmodule BackBreeze.RenderCacheTest do
   use ExUnit.Case, async: false
 
+  import ExUnit.CaptureLog
+
   alias BackBreeze.Box
   alias BackBreeze.RenderCache
   alias BackBreeze.RenderCache.Default
+  alias BackBreeze.RenderCache.MemoryLimit
 
   setup do
     RenderCache.clear()
@@ -112,6 +115,31 @@ defmodule BackBreeze.RenderCacheTest do
 
     assert Default.limit_for_available_memory(100_000_000) == 70_000_000
     assert Default.limit_for_available_memory(8 * gibibyte) == gibibyte
+  end
+
+  test "warns and uses 256 MiB when the memory supervisor is unavailable" do
+    previous_value = Application.fetch_env(:back_breeze, :render_cache_max_memory_bytes)
+
+    on_exit(fn ->
+      case previous_value do
+        {:ok, value} ->
+          Application.put_env(:back_breeze, :render_cache_max_memory_bytes, value)
+
+        :error ->
+          Application.delete_env(:back_breeze, :render_cache_max_memory_bytes)
+      end
+    end)
+
+    refute Process.whereis(:memsup)
+    Application.delete_env(:back_breeze, :render_cache_max_memory_bytes)
+
+    log =
+      capture_log(fn ->
+        assert MemoryLimit.resolve() == 256 * 1_024 * 1_024
+      end)
+
+    assert log =~ "OTP's :memsup is unavailable"
+    assert log =~ "Add :os_mon to your application's extra_applications"
   end
 
   test "reports the configured limit in bytes" do
