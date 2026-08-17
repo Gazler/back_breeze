@@ -85,8 +85,10 @@ defmodule BackBreeze.Grid.Children do
   end
 
   defp render_nested_grid_child(child_box, style, opts) do
+    children = Enum.map(child_box.children, &inherit_parent_colors(&1, style))
+
     BackBreeze.Grid.render_structured_with_dimensions(
-      child_box.children,
+      children,
       child_box.display,
       style,
       opts

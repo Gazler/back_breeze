@@ -161,6 +161,53 @@ defmodule BackBreeze.BoxTest do
                """
     end
 
+    test "children in cached nested multi-column grids inherit parent colors" do
+      child =
+        BackBreeze.Box.new(content: "Child", style: %{foreground_color: 7})
+
+      nested_grid =
+        BackBreeze.Box.new(
+          display: %BackBreeze.Grid{columns: 2},
+          style: %{width: 10, height: 1},
+          children: [child, child]
+        )
+
+      box =
+        BackBreeze.Box.new(
+          display: %BackBreeze.Grid{columns: 1},
+          style: %{width: 10, height: 1, background_color: 0},
+          children: [nested_grid]
+        )
+
+      rendered = BackBreeze.Box.render(box)
+
+      assert rendered.content == "\e[48;5;0;38;5;7mChildChild\e[0m"
+    end
+
+    test "children in cached nested vertical grids inherit parent colors" do
+      child =
+        BackBreeze.Box.new(content: "Child", style: %{foreground_color: 7})
+
+      nested_grid =
+        BackBreeze.Box.new(
+          display: %BackBreeze.Grid{columns: 1},
+          style: %{width: 5, height: 2},
+          children: [child, child]
+        )
+
+      box =
+        BackBreeze.Box.new(
+          display: %BackBreeze.Grid{columns: 1},
+          style: %{width: 5, height: 2, background_color: 0},
+          children: [nested_grid]
+        )
+
+      rendered = BackBreeze.Box.render(box)
+
+      assert rendered.content ==
+               "\e[48;5;0;38;5;7mChild\e[0m\n\e[48;5;0;38;5;7mChild\e[0m"
+    end
+
     test "child background color overrides inherited parent background" do
       box =
         BackBreeze.Box.new(
