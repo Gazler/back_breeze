@@ -50,7 +50,6 @@ defmodule BackBreeze.Box.BlockLayerMap do
 
   defp scrolled_child_supported?(child) do
     not layer_map_entries?(fixed_layer_map(child)) and
-      not child.overlay? and
       is_integer(child.left || 0) and
       is_integer(child.top || 0) and
       is_integer(child.height) and
@@ -305,7 +304,6 @@ defmodule BackBreeze.Box.BlockLayerMap do
 
   defp scrolled_child_entry(child, viewport, scroll) do
     with true <- not layer_map_entries?(fixed_layer_map(child)),
-         true <- not child.overlay?,
          left when is_integer(left) <- child.left || 0,
          top when is_integer(top) <- child.top || 0,
          height when is_integer(height) <- child.height,

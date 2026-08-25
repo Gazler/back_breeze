@@ -1147,7 +1147,7 @@ defmodule BackBreeze.Box do
     end
   end
 
-  defp flow_children_context(_box, children) do
+  defp flow_children_context(box, children) do
     relative = relative_children(children)
     has_overlay_children? = Enum.any?(children, &(PositionedLayout.overlay?(&1) || &1.overlay?))
     {layer, style} = child_layer_and_style(children, relative)
@@ -1155,7 +1155,7 @@ defmodule BackBreeze.Box do
     %{
       children: children,
       relative: relative,
-      absolutes: flow_absolute_children(children),
+      absolutes: flow_absolute_children(children, box),
       has_overlay_children?: has_overlay_children?,
       relative_has_overlay?: overlay_children?(relative),
       layer: layer,
@@ -1272,7 +1272,11 @@ defmodule BackBreeze.Box do
 
   defp grid_absolute_children(children), do: Enum.filter(children, &(&1.position == :absolute))
 
-  defp flow_absolute_children(children) do
+  defp flow_absolute_children(children, %{style: %{overflow: :hidden}}) do
+    Enum.filter(children, &PositionedLayout.overlay?/1)
+  end
+
+  defp flow_absolute_children(children, _box) do
     overlay_absolutes =
       children
       |> Enum.filter(&(not PositionedLayout.overlay?(&1) and &1.overlay?))

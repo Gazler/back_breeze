@@ -1177,6 +1177,45 @@ defmodule BackBreeze.BoxTest do
                """
     end
 
+    test "scrolls a flow wrapper containing an absolute descendant" do
+      trigger =
+        BackBreeze.Box.new(
+          style: %{width: 6, height: 1},
+          children: [
+            BackBreeze.Box.new(content: "menu"),
+            BackBreeze.Box.new(
+              content: "v",
+              position: :absolute,
+              left: 5,
+              top: 0,
+              layer: 1
+            )
+          ]
+        )
+
+      wrapper =
+        BackBreeze.Box.new(
+          style: %{width: 6},
+          children: [
+            BackBreeze.Box.new(content: "A"),
+            trigger,
+            BackBreeze.Box.new(content: "C"),
+            BackBreeze.Box.new(content: "D")
+          ]
+        )
+
+      box =
+        BackBreeze.Box.new(
+          scroll: {2, 0},
+          style: %{width: 6, height: 2, overflow: :hidden},
+          children: [wrapper]
+        )
+
+      rendered = BackBreeze.Box.render(box)
+
+      assert BackBreeze.Utils.strip_escape_chars(rendered.content) == "C     \nD     "
+    end
+
     test "renders a vertical scrollbar for overflowing leaf content" do
       box =
         BackBreeze.Box.new(
