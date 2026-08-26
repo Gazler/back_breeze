@@ -1,14 +1,10 @@
-## [0.4.3] - 2026-08-14
-
-### Features
-
-- *(BackBreeze.RenderCache)* Make os_mon opt-in for memory ([bd1c271](https://github.com/gazler/breeze/commit/bd1c271d7d91000dc7652aa3a3e8de70f305f0b8))
-## [0.4.2] - 2026-07-30
+## [0.4.4] - 2026-08-26
 
 ### Features
 
 - *(BackBreeze.Cache)* Support configurable cache backends ([eb30f8c](https://github.com/gazler/breeze/commit/eb30f8ca56091cd021084539e3ae093fe574c928))
 - *(BackBreeze.Style)* Support max height contstraints ([87bce2e](https://github.com/gazler/breeze/commit/87bce2eae34332cdf9faccc086fb301aa273f3ca))
+- *(BackBreeze.RenderCache)* Make os_mon opt-in for memory ([bd1c271](https://github.com/gazler/breeze/commit/bd1c271d7d91000dc7652aa3a3e8de70f305f0b8))
 
 ### Bug Fixes
 
@@ -17,6 +13,8 @@
 - *(BackBreeze.Ucwidth)* Fallback to unicode_width if prim_tty missing ([73f403a](https://github.com/gazler/breeze/commit/73f403ac5d6678356a48948366e1bc2649e890fe))
 - *(BackBreeze.Box)* Ensure that empty inline space is reserved ([766c871](https://github.com/gazler/breeze/commit/766c87148a919a0e38c50f8a938ff1384d999627))
 - *(BackBreeze.RenderCache)* Size cache from available memory ([f1b12f6](https://github.com/gazler/breeze/commit/f1b12f6cfaa418da7809757398a767b715227ef3))
+- *(BackBreeze.Grid)* Inherit parent bg in grid ([d3451d5](https://github.com/gazler/breeze/commit/d3451d5d4888bfb2b22697565786478eb59d0dec))
+- *(BackBreeze.Box)* Fix absolute nested scroll bars ([b1a86d2](https://github.com/gazler/breeze/commit/b1a86d2b6945cf70cbd02ebe91fe3e8819d22931))
 
 ### Refactor
 
