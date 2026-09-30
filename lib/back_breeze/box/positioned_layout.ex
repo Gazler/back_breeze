@@ -35,11 +35,8 @@ defmodule BackBreeze.Box.PositionedLayout do
     rendered_boxes = sorted_rendered_boxes(children, opts)
 
     case collect_non_overlapping_layer_maps(rendered_boxes) do
-      {:ok, layer_map, fills, wide?, max_width, max_height} ->
-        layer_map =
-          layer_map
-          |> LayerMap.put_default_fill_entries(fills)
-          |> LayerMap.mark_wide_glyph_metadata(wide?)
+      {:ok, fragments, max_width, max_height} ->
+        layer_map = LayerMap.compose_fragments(fragments)
 
         {width, height} = composed_layer_map_dimensions(max_width, max_height, opts)
 
@@ -280,14 +277,9 @@ defmodule BackBreeze.Box.PositionedLayout do
          height when is_integer(height) <- child.height,
          rect = {left, top, left + max(width - 1, 0), top + max(height - 1, 0)},
          false <- rect_overlaps_any?(rect, rects) do
-      {child_map, child_fills, child_wide?} =
-        LayerMap.shift_simple_child(child.layer_map, left, top)
-
       {:ok,
        %{
-         layer_map: child_map,
-         fills: child_fills,
-         wide?: child_wide?,
+         fragment: {child.layer_map, left, top},
          rect: rect
        }}
     else
@@ -298,9 +290,7 @@ defmodule BackBreeze.Box.PositionedLayout do
   defp append_non_overlapping_child_entry(state, entry) do
     %{
       state
-      | layer_map: Map.merge(state.layer_map, entry.layer_map),
-        fills: entry.fills ++ state.fills,
-        wide?: state.wide? or entry.wide?,
+      | fragments: [entry.fragment | state.fragments],
         rects: [entry.rect | state.rects],
         max_width: max(state.max_width, elem(entry.rect, 2)),
         max_height: max(state.max_height, elem(entry.rect, 3))
@@ -310,17 +300,15 @@ defmodule BackBreeze.Box.PositionedLayout do
   defp finish_non_overlapping_layer_maps(:error), do: :error
 
   defp finish_non_overlapping_layer_maps(%{
-         layer_map: layer_map,
-         fills: fills,
-         wide?: wide?,
+         fragments: fragments,
          max_width: max_width,
          max_height: max_height
        }) do
-    {:ok, layer_map, fills, wide?, max_width, max_height}
+    {:ok, Enum.reverse(fragments), max_width, max_height}
   end
 
   defp empty_non_overlapping_state do
-    %{layer_map: %{}, fills: [], wide?: false, rects: [], max_width: 0, max_height: 0}
+    %{fragments: [], rects: [], max_width: 0, max_height: 0}
   end
 
   defp rect_overlaps_any?(rect, rects), do: Enum.any?(rects, &rect_overlaps?(rect, &1))

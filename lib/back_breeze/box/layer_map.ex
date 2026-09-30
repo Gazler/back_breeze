@@ -7,9 +7,67 @@ defmodule BackBreeze.Box.LayerMap do
   @wide_glyph_key :__wide_glyphs__
   @default_fill_key :__default_fill__
 
+  # Fragments are in paint order. Keep their maps in local coordinates until
+  # composition, then allocate the combined map once instead of one per child.
+  # This is for the non-overlapping compositor, not transparent overlay merging.
+  def compose_fragments(fragments, bounds \\ nil)
+
+  def compose_fragments([{map, 0, 0}], nil) do
+    map
+    |> put_default_fill_entries(default_fill_entries(map))
+    |> mark_wide_glyph_metadata(has_wide_glyphs?(map))
+  end
+
+  def compose_fragments(fragments, bounds) do
+    {cells, fills, wide?} =
+      Enum.reduce(fragments, {[], [], false}, fn {map, dx, dy}, {cells, fills, wide?} ->
+        cells =
+          Enum.reduce(map, cells, fn
+            {{y, x}, value}, acc ->
+              x = x + dx
+              y = y + dy
+              if is_nil(bounds) or point_in_bounds?(x, y, bounds), do: [{{y, x}, value} | acc], else: acc
+
+            _, acc ->
+              acc
+          end)
+
+        {cells, shifted_default_fill_entries(map, dx, dy) ++ fills, wide? or has_wide_glyphs?(map)}
+      end)
+
+    map = cells |> Enum.reverse() |> Map.new()
+
+    if bounds do
+      map
+      |> mark_wide_glyph_metadata(wide?)
+      |> maybe_clip_default_fill(%{@default_fill_key => fills}, bounds)
+    else
+      map |> put_default_fill_entries(fills) |> mark_wide_glyph_metadata(wide?)
+    end
+  end
+
   def merge(target_map, source_map, {offset_x, offset_y}) do
     {map, max_x, max_y} = do_merge(target_map, source_map, {offset_x, offset_y})
-    {map, max(max_x, max_x(map)), max(max_y, max_y(map))}
+    {map_max_x, map_max_y} = bounds(map)
+    {map, max(max_x, map_max_x), max(max_y, map_max_y)}
+  end
+
+  @doc false
+  def bounds(layer_map) do
+    explicit =
+      Enum.reduce(layer_map, nil, fn
+        {{y, x}, _value}, nil -> {x, y}
+        {{y, x}, _value}, {max_x, max_y} -> {max(x, max_x), max(y, max_y)}
+        _, acc -> acc
+      end)
+
+    Enum.reduce(default_fill_entries(layer_map), explicit, fn
+      {_point, _left, _top, right, bottom}, nil ->
+        {right, bottom}
+
+      {_point, _left, _top, right, bottom}, {max_x, max_y} ->
+        {max(right, max_x), max(bottom, max_y)}
+    end) || {-1, -1}
   end
 
   @doc false
@@ -78,7 +136,8 @@ defmodule BackBreeze.Box.LayerMap do
   end
 
   def generate(nil, layer_map, _start_x, _y) do
-    {layer_map, max(max_x(layer_map), 0), max(max_y(layer_map), 0)}
+    {max_x, max_y} = bounds(layer_map)
+    {layer_map, max(max_x, 0), max(max_y, 0)}
   end
 
   def generate(content, layer_map, start_x, y) do
@@ -506,11 +565,44 @@ defmodule BackBreeze.Box.LayerMap do
   defp clear_fill_covered_cells(target_map, source_map, offset_x, offset_y) do
     fills = shifted_default_fill_entries(source_map, offset_x, offset_y)
 
-    if fills == [] do
-      target_map
-    else
-      Enum.reduce(target_map, %{}, &clear_fill_covered_entry(&1, &2, fills))
+    case fills do
+      [] ->
+        target_map
+
+      [_] ->
+        Enum.reduce(target_map, %{}, &clear_fill_covered_entry(&1, &2, fills))
+
+      _ ->
+        # Index only rows actually encountered in the target. Do not expand
+        # arbitrary fill heights, or scan every fill again for each column.
+        {map, _rows} =
+          Enum.reduce(target_map, {%{}, %{}}, &clear_row_fill_covered_entry(&1, &2, fills))
+
+        map
     end
+  end
+
+  defp clear_row_fill_covered_entry({{y, x} = key, value}, {map, rows}, fills) do
+    {row_fills, rows} =
+      case rows do
+        %{^y => row_fills} ->
+          {row_fills, rows}
+
+        _ ->
+          row_fills =
+            Enum.filter(fills, fn {_point, _left, top, _right, bottom} ->
+              y >= top and y <= bottom
+            end)
+
+          {row_fills, Map.put(rows, y, row_fills)}
+      end
+
+    map = if point_in_any_fill?(x, y, row_fills), do: map, else: Map.put(map, key, value)
+    {map, rows}
+  end
+
+  defp clear_row_fill_covered_entry(entry, {map, rows}, fills) do
+    {clear_fill_covered_entry(entry, map, fills), rows}
   end
 
   defp clear_fill_covered_entry({@wide_glyph_key, true}, acc, _fills),
@@ -651,9 +743,27 @@ defmodule BackBreeze.Box.LayerMap do
   end
 
   defp dense_row_to_content(y, %{bounds: bounds, reset: reset} = context) do
+    context = %{
+      context
+      | fills: row_fills(context.fills, y, bounds),
+        overlay_fills: row_fills(context.overlay_fills, y, bounds)
+    }
+
     bounds.start_x..bounds.max_x
     |> Enum.reduce({[], [], "", false}, &append_dense_cell(&1, y, &2, context))
     |> finish_dense_row(reset)
+  end
+
+  # Preserve priority while excluding rectangles that cannot paint this row.
+  # Otherwise every blank cell scans fills belonging to all the other rows.
+  defp row_fills(fills, y, bounds) do
+    Enum.filter(fills, fn
+      {{_char, _style}, left, top, right, bottom} ->
+        y >= top and y <= bottom and right >= bounds.start_x and left <= bounds.max_x
+
+      _ ->
+        false
+    end)
   end
 
   defp append_dense_cell(x, y, {segments, buffer, last_style, skip}, context) do
