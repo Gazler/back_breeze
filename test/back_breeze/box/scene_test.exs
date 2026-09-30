@@ -110,6 +110,27 @@ defmodule BackBreeze.Box.SceneTest do
              BackBreeze.Style.render(box.style, box.content)
   end
 
+  test "content-only rendering preserves output and dimensions without exporting cell maps" do
+    alias BackBreeze.Box
+
+    box =
+      Box.new(
+        content: String.duplicate(String.duplicate("x", 78) <> "\n", 20),
+        style: %{width: 80, height: 24, foreground_color: 7, border: :line}
+      )
+
+    box = Box.new(children: [box], style: %{width: 80, height: 24, background_color: 0})
+    regular = Box.render_with_dimensions(box)
+    compact = Box.render_content_with_dimensions(box)
+    assert compact.dimensions == regular.dimensions
+    assert compact.box.content == regular.box.content
+    assert {compact.box.width, compact.box.height} == {regular.box.width, regular.box.height}
+    assert compact.box.layer_map == %{}
+    assert compact.box.fixed_layer_map == %{}
+    assert compact.box.children == []
+    assert Box.render_with_dimensions(box) == regular
+  end
+
   test "styled text rows remain deferred when clipped" do
     rows = [[{"hello", "red"}, {" world", "blue"}], [{"second row ", "green"}]]
     scene = Scene.from_styled_rows(rows, 2, 3)

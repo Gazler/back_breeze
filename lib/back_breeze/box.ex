@@ -97,7 +97,33 @@ defmodule BackBreeze.Box do
       fetch_box_render(box, fn -> render_with_dimensions_cache_key(box, opts) end, fn ->
         do_render_with_dimensions(box, opts)
       end)
+      |> Map.update!(:box, &ensure_rendered_content/1)
       |> maybe_flatten_rendered_box(opts)
+    end)
+  end
+
+  @doc false
+  def render_content_with_dimensions(box, opts \\ []) do
+    RenderCache.with_frame(fn ->
+      result =
+        fetch_box_render(box, fn -> render_with_dimensions_cache_key(box, opts) end, fn ->
+          do_render_with_dimensions(box, opts)
+        end)
+
+      rendered =
+        case result.box do
+          %{layer_map: %{__scene__: _} = scene, fixed_layer_map: fixed} = rendered
+          when map_size(fixed) == 0 ->
+            content =
+              Scene.to_content(scene, %{start_x: 0, start_y: 0, max_x: rendered.width - 1, max_y: rendered.height - 1})
+
+            %{rendered | content: content}
+
+          rendered ->
+            ensure_rendered_content(rendered)
+        end
+
+      %{result | box: %{rendered | children: [], layer_map: %{}, fixed_layer_map: %{}}}
     end)
   end
 
@@ -106,7 +132,6 @@ defmodule BackBreeze.Box do
       render_and_calc(%{box: box, dimensions: [], id: 0}, opts)
 
     dimensions = Enum.sort(dimensions) |> Enum.map(&elem(&1, 1))
-    box = ensure_rendered_content(box)
     %{box: box, dimensions: dimensions}
   end
 
