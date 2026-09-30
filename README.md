@@ -79,9 +79,9 @@ config :os_mon,
   start_disksup: false
 ```
 
-Without `:os_mon`, BackBreeze logs a warning and uses a conservative 256 MiB
+Without `:os_mon`, BackBreeze logs at debug level and uses a conservative 256 MiB
 limit. Set an explicit limit to use a different value and suppress that
-warning:
+message:
 
 ```elixir
 config :back_breeze, render_cache_max_memory_bytes: 256 * 1_024 * 1_024
