@@ -74,6 +74,8 @@ defmodule BackBreeze.Box do
   ## Options
 
     * `:terminal` - the terminal to use. This is used for the terminal size if provided.
+    * `:output` - `:full` (default) retains the rendered tree and layer maps.
+      `:content` returns ANSI content and box size with empty children and layer maps.
   """
   def render(box, opts \\ []) do
     render_with_dimensions(box, opts)
@@ -86,6 +88,7 @@ defmodule BackBreeze.Box do
   This function returns the box as with `render/2`, but it is wrapped in a map which
   also contains the rendered dimension for each box as a flat list.
   This can be used at a higher level to determine the viewport.
+  With `output: :content`, the complete dimensions list is still returned.
 
   ## Options
 
@@ -97,34 +100,28 @@ defmodule BackBreeze.Box do
       fetch_box_render(box, fn -> render_with_dimensions_cache_key(box, opts) end, fn ->
         do_render_with_dimensions(box, opts)
       end)
-      |> Map.update!(:box, &ensure_rendered_content/1)
+      |> Map.update!(:box, &render_output(&1, Keyword.get(opts, :output, :full)))
       |> maybe_flatten_rendered_box(opts)
     end)
   end
 
-  @doc false
-  def render_content_with_dimensions(box, opts \\ []) do
-    RenderCache.with_frame(fn ->
-      result =
-        fetch_box_render(box, fn -> render_with_dimensions_cache_key(box, opts) end, fn ->
-          do_render_with_dimensions(box, opts)
-        end)
+  defp render_output(box, :full), do: ensure_rendered_content(box)
 
-      rendered =
-        case result.box do
-          %{layer_map: %{__scene__: _} = scene, fixed_layer_map: fixed} = rendered
-          when map_size(fixed) == 0 ->
-            content =
-              Scene.to_content(scene, %{start_x: 0, start_y: 0, max_x: rendered.width - 1, max_y: rendered.height - 1})
+  defp render_output(box, :content) do
+    rendered =
+      case box do
+        %{layer_map: %{__scene__: _} = scene, fixed_layer_map: fixed} = rendered
+        when map_size(fixed) == 0 ->
+          content =
+            Scene.to_content(scene, %{start_x: 0, start_y: 0, max_x: rendered.width - 1, max_y: rendered.height - 1})
 
-            %{rendered | content: content}
+          %{rendered | content: content}
 
-          rendered ->
-            ensure_rendered_content(rendered)
-        end
+        rendered ->
+          ensure_rendered_content(rendered)
+      end
 
-      %{result | box: %{rendered | children: [], layer_map: %{}, fixed_layer_map: %{}}}
-    end)
+    %{rendered | children: [], layer_map: %{}, fixed_layer_map: %{}}
   end
 
   defp do_render_with_dimensions(box, opts) do

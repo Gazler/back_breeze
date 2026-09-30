@@ -121,13 +121,15 @@ defmodule BackBreeze.Box.SceneTest do
 
     box = Box.new(children: [box], style: %{width: 80, height: 24, background_color: 0})
     regular = Box.render_with_dimensions(box)
-    compact = Box.render_content_with_dimensions(box)
+    compact = Box.render_with_dimensions(box, output: :content)
     assert compact.dimensions == regular.dimensions
     assert compact.box.content == regular.box.content
     assert {compact.box.width, compact.box.height} == {regular.box.width, regular.box.height}
     assert compact.box.layer_map == %{}
     assert compact.box.fixed_layer_map == %{}
     assert compact.box.children == []
+    assert Box.render(box, output: :content) == compact.box
+    assert Box.render_with_dimensions(box, output: :full) == regular
     assert Box.render_with_dimensions(box) == regular
   end
 
