@@ -77,7 +77,7 @@ defmodule BackBreeze.RenderCacheTest do
       :ets.tab2list(:back_breeze_render_cache)
       |> Enum.map(&elem(&1, 0))
       |> Enum.filter(fn
-        {:stable, {:render_self, _, _, _, _}} -> true
+        {:stable, {:render_self, _, _, _, _, _}} -> true
         {:stable, {:generate_layer_map, _}} -> true
         {:stable, {:layer_maps_to_content, _, _, _}} -> true
         _ -> false

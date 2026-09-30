@@ -17,7 +17,7 @@ defmodule BackBreeze.Box.BlockLayerMap do
       ) do
     (structured? and structured_scrolled?(box, relative)) or
       (structured?(box, relative) and
-         (structured? or
+         (structured? or Enum.any?(relative, &BackBreeze.Box.Scene.deferred?(&1.layer_map)) or
             ((absolutes != [] or relative_has_overlay?) and
                Enum.any?(relative, &rendered_layer_map_entries?/1))))
   end
@@ -75,8 +75,14 @@ defmodule BackBreeze.Box.BlockLayerMap do
         {
           max(layout.width, painted.width),
           max(layout.height, painted.height),
-          Map.merge(layout.layer_map, painted.layer_map),
-          Map.merge(layout.fixed_layer_map, painted.fixed_layer_map)
+          Map.merge(
+            BackBreeze.Box.Scene.materialize(layout.layer_map),
+            BackBreeze.Box.Scene.materialize(painted.layer_map)
+          ),
+          Map.merge(
+            BackBreeze.Box.Scene.materialize(layout.fixed_layer_map),
+            BackBreeze.Box.Scene.materialize(painted.fixed_layer_map)
+          )
         }
     end
   end

@@ -275,13 +275,25 @@ defmodule BackBreeze.Scrollbar do
         if !context.vertical? and !context.horizontal? do
           layer_map
         else
-          layer_map
-          |> maybe_clear_scrollbar_strips(context)
-          |> maybe_draw_vertical_scrollbar(context)
-          |> maybe_draw_horizontal_scrollbar(context)
-          |> maybe_draw_intersection(context)
+          if BackBreeze.Box.Scene.deferred?(layer_map) do
+            overlay = paint_scrollbars(%{}, context)
+
+            if BackBreeze.Box.Scene.supported?(overlay),
+              do: BackBreeze.Box.Scene.merge(layer_map, overlay, {0, 0}),
+              else: paint_scrollbars(BackBreeze.Box.Scene.materialize(layer_map), context)
+          else
+            paint_scrollbars(layer_map, context)
+          end
         end
     end
+  end
+
+  defp paint_scrollbars(layer_map, context) do
+    layer_map
+    |> maybe_clear_scrollbar_strips(context)
+    |> maybe_draw_vertical_scrollbar(context)
+    |> maybe_draw_horizontal_scrollbar(context)
+    |> maybe_draw_intersection(context)
   end
 
   defp color_segment(%Segment{} = segment, color) do

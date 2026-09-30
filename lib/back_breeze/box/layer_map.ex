@@ -3,6 +3,7 @@ defmodule BackBreeze.Box.LayerMap do
 
   alias BackBreeze.RenderCache
   alias BackBreeze.Ucwidth
+  alias BackBreeze.Box.Scene
 
   @wide_glyph_key :__wide_glyphs__
   @default_fill_key :__default_fill__
@@ -12,6 +13,8 @@ defmodule BackBreeze.Box.LayerMap do
   # This is for the non-overlapping compositor, not transparent overlay merging.
   def compose_fragments(fragments, bounds \\ nil)
 
+  def compose_fragments([{%{__scene__: _} = map, 0, 0}], nil), do: map
+
   def compose_fragments([{map, 0, 0}], nil) do
     map
     |> put_default_fill_entries(default_fill_entries(map))
@@ -19,6 +22,14 @@ defmodule BackBreeze.Box.LayerMap do
   end
 
   def compose_fragments(fragments, bounds) do
+    if Enum.any?(fragments, fn {map, _, _} -> Scene.deferred?(map) end) do
+      Scene.compose(fragments, bounds)
+    else
+      compose_flat_fragments(fragments, bounds)
+    end
+  end
+
+  defp compose_flat_fragments(fragments, bounds) do
     {cells, fills, wide?} =
       Enum.reduce(fragments, {[], [], false}, fn {map, dx, dy}, {cells, fills, wide?} ->
         cells =
@@ -46,6 +57,9 @@ defmodule BackBreeze.Box.LayerMap do
     end
   end
 
+  def merge(%{__scene__: _} = target, source, offset), do: Scene.merge_dimensions(target, source, offset)
+  def merge(target, %{__scene__: _} = source, offset), do: Scene.merge_dimensions(target, source, offset)
+
   def merge(target_map, source_map, {offset_x, offset_y}) do
     {map, max_x, max_y} = do_merge(target_map, source_map, {offset_x, offset_y})
     {map_max_x, map_max_y} = bounds(map)
@@ -53,6 +67,8 @@ defmodule BackBreeze.Box.LayerMap do
   end
 
   @doc false
+  def bounds(%{__scene_bounds__: {_, _, x, y}}), do: {x, y}
+
   def bounds(layer_map) do
     explicit =
       Enum.reduce(layer_map, nil, fn
@@ -71,6 +87,9 @@ defmodule BackBreeze.Box.LayerMap do
   end
 
   @doc false
+  def merge_map(%{__scene__: _} = target, source, offset), do: Scene.merge(target, source, offset)
+  def merge_map(target, %{__scene__: _} = source, offset), do: Scene.merge(target, source, offset)
+
   def merge_map(target_map, source_map, {offset_x, offset_y}) do
     {map, _max_x, _max_y} = do_merge(target_map, source_map, {offset_x, offset_y})
     map
@@ -98,6 +117,12 @@ defmodule BackBreeze.Box.LayerMap do
   end
 
   @doc false
+  def merge_metadata_base(%{__scene__: _}, _source), do: :error
+
+  def merge_metadata_base(target, %{__scene__: _} = source) do
+    if entries?(target), do: :error, else: {:ok, Scene.merge(target, source, {0, 0})}
+  end
+
   def merge_metadata_base(target_map, source_map) do
     cond do
       entries?(target_map) ->
@@ -123,6 +148,8 @@ defmodule BackBreeze.Box.LayerMap do
   end
 
   def clear_covered_by_source(target_map, source_map, {offset_x, offset_y}) do
+    target_map = Scene.materialize(target_map)
+    source_map = Scene.materialize(source_map)
     coverage_rects = layer_map_coverage_rects(source_map, offset_x, offset_y)
 
     if coverage_rects == [] do
@@ -141,6 +168,7 @@ defmodule BackBreeze.Box.LayerMap do
   end
 
   def generate(content, layer_map, start_x, y) do
+    layer_map = Scene.materialize(layer_map)
     reset = Termite.Style.reset_code()
 
     {_x, y, {acc, max_x, _, _, _}} =
@@ -182,7 +210,7 @@ defmodule BackBreeze.Box.LayerMap do
   end
 
   def to_content(layer_map, overlay_layer_map, %{} = bounds) do
-    do_to_content(layer_map, overlay_layer_map, bounds)
+    do_to_content(Scene.materialize(layer_map), Scene.materialize(overlay_layer_map), bounds)
   end
 
   def to_content(layer_map, overlay_layer_map, width, height) do
@@ -195,6 +223,8 @@ defmodule BackBreeze.Box.LayerMap do
   end
 
   def cached_to_content(layer_map, overlay_layer_map, bounds) do
+    layer_map = Scene.materialize(layer_map)
+    overlay_layer_map = Scene.materialize(overlay_layer_map)
     area = (bounds.max_x - bounds.start_x + 1) * (bounds.max_y - bounds.start_y + 1)
 
     if area >= 256 and (map_size(layer_map) > 0 or map_size(overlay_layer_map) > 0) do
@@ -207,6 +237,8 @@ defmodule BackBreeze.Box.LayerMap do
     end
   end
 
+  def filter(%{__scene__: _} = map, bounds), do: Scene.clip(map, bounds)
+
   def filter(layer_map, %{start_x: start_x, start_y: start_y, max_x: max_x, max_y: max_y}) do
     bounds = %{start_x: start_x, start_y: start_y, max_x: max_x, max_y: max_y}
     filtered = Enum.reduce(layer_map, %{}, &filter_entry(&1, &2, bounds))
@@ -215,6 +247,8 @@ defmodule BackBreeze.Box.LayerMap do
     |> mark_wide_glyph_metadata(has_wide_glyphs?(layer_map) and map_size(filtered) > 0)
     |> maybe_clip_default_fill(layer_map, bounds)
   end
+
+  def shift(%{__scene__: _} = map, x, y), do: Scene.shift(map, x, y)
 
   def shift(layer_map, shift_x, shift_y) do
     shift = %{x: shift_x, y: shift_y}
@@ -225,6 +259,8 @@ defmodule BackBreeze.Box.LayerMap do
     |> maybe_shift_default_fill(layer_map, shift_x, shift_y)
   end
 
+  def shift_simple_child(%{__scene__: _} = map, x, y), do: {Scene.shift(map, x, y), [], false}
+
   def shift_simple_child(layer_map, shift_x, shift_y) do
     shift = %{x: shift_x, y: shift_y}
     {map, wide?} = Enum.reduce(layer_map, {%{}, false}, &shift_simple_child_entry(&1, &2, shift))
@@ -232,6 +268,9 @@ defmodule BackBreeze.Box.LayerMap do
     fills = shifted_default_fill_entries(layer_map, shift_x, shift_y)
     {map, fills, wide?}
   end
+
+  def clip_child(%{__scene__: _} = map, %{overflow: :hidden, border: border}, %{max_x: x, max_y: y})
+      when is_integer(x) and is_integer(y), do: Scene.clip(map, child_clip_bounds(border, x, y))
 
   def clip_child(layer_map, %{overflow: :hidden, border: border}, %{max_x: max_x, max_y: max_y})
       when is_integer(max_x) and is_integer(max_y) do
@@ -361,6 +400,8 @@ defmodule BackBreeze.Box.LayerMap do
 
   def has_wide_glyphs?(_layer_map), do: false
 
+  def entries?(%{__scene__: layers}), do: Enum.any?(layers, fn {map, _, _, _} -> entries?(map) end)
+
   def entries?(layer_map) when is_map(layer_map),
     do: map_size(layer_map) > metadata_count(layer_map)
 
@@ -372,6 +413,7 @@ defmodule BackBreeze.Box.LayerMap do
 
   def content?(_layer_map), do: false
 
+  def height(%{__scene_bounds__: {_, _, _, y}}), do: y + 1
   def height(layer_map) when map_size(layer_map) == 0, do: nil
 
   def height(layer_map) do
@@ -394,6 +436,7 @@ defmodule BackBreeze.Box.LayerMap do
     end
   end
 
+  def max_x(%{__scene_bounds__: {_, _, x, _}}), do: x
   def max_x(layer_map) when map_size(layer_map) == 0, do: -1
 
   def max_x(layer_map) do
@@ -422,6 +465,8 @@ defmodule BackBreeze.Box.LayerMap do
       height -> height - 1
     end
   end
+
+  def default_fill_entries(%{__scene__: _} = map), do: Scene.fills(map)
 
   def default_fill_entries(layer_map) when is_map(layer_map) do
     layer_map
