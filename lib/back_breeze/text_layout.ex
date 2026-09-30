@@ -13,14 +13,16 @@ defmodule BackBreeze.TextLayout do
   def span_content?(_content), do: false
 
   def source_metrics(content) when is_binary(content) do
-    source_lines = String.split(content, "\n")
+    source_lines = :binary.split(content, "\n", [:global])
 
-    intrinsic_width =
-      Enum.reduce(source_lines, 0, fn line, acc ->
-        max(acc, string_length(line))
-      end)
+    if BackBreeze.Utils.large_plain_ascii?(content) do
+      {byte_size(content), Enum.reduce(source_lines, 0, &max(byte_size(&1), &2))}
+    else
+      intrinsic_width =
+        Enum.reduce(source_lines, 0, fn line, acc -> max(acc, string_length(line)) end)
 
-    {string_length(content), intrinsic_width}
+      {string_length(content), intrinsic_width}
+    end
   end
 
   def source_metrics(content) when is_list(content) do

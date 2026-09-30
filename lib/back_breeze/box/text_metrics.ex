@@ -10,8 +10,13 @@ defmodule BackBreeze.Box.TextMetrics do
   def height(_content), do: 0
 
   def metrics(content) when is_binary(content) do
-    {max_width, current_width, line_count, _in_seq} = do_metrics(content, 0, 0, 1, false)
-    {max(max_width, current_width), line_count}
+    if BackBreeze.Utils.large_plain_ascii?(content) do
+      lines = :binary.split(content, "\n", [:global])
+      {Enum.reduce(lines, 0, &max(byte_size(&1), &2)), length(lines)}
+    else
+      {max_width, current_width, line_count, _in_seq} = do_metrics(content, 0, 0, 1, false)
+      {max(max_width, current_width), line_count}
+    end
   end
 
   defp do_metrics(<<>>, max_width, current_width, line_count, in_seq) do

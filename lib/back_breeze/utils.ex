@@ -14,8 +14,14 @@ defmodule BackBreeze.Utils do
   ```
   """
   def string_length(str) do
-    do_string_length(str, false, 0)
+    if large_plain_ascii?(str), do: byte_size(str), else: do_string_length(str, false, 0)
   end
+
+  @doc false
+  def large_plain_ascii?(str) when byte_size(str) >= 256,
+    do: Regex.match?(~r/\A[\x20-\x7e\n]*\z/, str)
+
+  def large_plain_ascii?(_str), do: false
 
   @doc """
   Strip escape characters from a string.
