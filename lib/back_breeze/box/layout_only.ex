@@ -45,6 +45,49 @@ defmodule BackBreeze.Box.LayoutOnly do
     end
   end
 
+  def child_result(%{children: [], content: content, style: style, scroll: {0, 0}} = child, opts)
+      when is_binary(content) and byte_size(content) > 0 and byte_size(content) < 1024 do
+    width = if style.width == :auto, do: byte_size(content), else: style.width
+
+    with true <- Keyword.get(opts, :structured, false),
+         true <- layout_only_style?(style),
+         true <- style.height in [0, 1, :auto] and style.text_align == :left,
+         true <- is_nil(style.max_height) or style.max_height >= 1,
+         true <- is_integer(width) and width >= byte_size(content),
+         true <- Regex.match?(~r/\A[\x20-\x7e]+\z/, content) do
+      text = content <> String.duplicate(" ", width - byte_size(content))
+      seq = LayerMap.content_style_sequence(style)
+      text = if seq == "", do: text, else: seq <> text <> Termite.Style.reset_code()
+
+      dimension = %{
+        width: width,
+        viewport_width: width,
+        content_width: width,
+        height: 1,
+        viewport_height: 1,
+        content_height: 1,
+        left: 0,
+        top: 0
+      }
+
+      box = %{
+        child
+        | content: text,
+          width: width,
+          height: 1,
+          state: :rendered,
+          children: [],
+          layer_map: %{},
+          fixed_layer_map: %{},
+          overlay?: false
+      }
+
+      %{box: box, dimensions: [dimension]}
+    else
+      _ -> nil
+    end
+  end
+
   def child_result(_child, _opts), do: nil
 
   defp layout_only_dimension(value, _style_value) when is_integer(value), do: value

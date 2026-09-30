@@ -45,6 +45,32 @@ defmodule BackBreeze.Box.SceneTest do
     refute Scene.deferred?(Scene.compose([{row, 0, 0}, {row, 0, 2}, {row, 0, 2}], nil))
   end
 
+  test "simple label layout matches the full renderer" do
+    alias BackBreeze.Box
+
+    for width <- [:auto, 22], height <- [0, 1, :auto], overflow <- [:auto, :hidden] do
+      box =
+        Box.new(
+          content: "label",
+          style: %{
+            width: width,
+            height: height,
+            overflow: overflow,
+            foreground_color: 7,
+            background_color: 0,
+            bold: true
+          }
+        )
+
+      expected = Box.render_structured_with_dimensions(box)
+      actual = BackBreeze.Box.LayoutOnly.child_result(box, structured: true)
+      assert actual != nil
+      assert actual.dimensions == expected.dimensions
+      assert actual.box.content == expected.box.content
+      assert {actual.box.width, actual.box.height} == {expected.box.width, expected.box.height}
+    end
+  end
+
   test "structured inline rows compose child layers without an ANSI round trip" do
     alias BackBreeze.Box
 

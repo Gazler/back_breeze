@@ -1140,7 +1140,8 @@ defmodule BackBreeze.Box do
             context.opts
           end
 
-        LayoutOnly.child_result(child, layout_opts) ||
+        BackBreeze.Box.InlineLayout.child_result(child, layout_opts) ||
+          LayoutOnly.child_result(child, layout_opts) ||
           render_cached_with_dimensions(child,
             structured: true,
             defer_layers: true,
