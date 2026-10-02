@@ -1,10 +1,12 @@
-## [0.4.4] - 2026-08-26
+
+## [0.4.5] - 2026-10-02
 
 ### Features
 
 - *(BackBreeze.Cache)* Support configurable cache backends ([eb30f8c](https://github.com/gazler/breeze/commit/eb30f8ca56091cd021084539e3ae093fe574c928))
 - *(BackBreeze.Style)* Support max height contstraints ([87bce2e](https://github.com/gazler/breeze/commit/87bce2eae34332cdf9faccc086fb301aa273f3ca))
 - *(BackBreeze.RenderCache)* Make os_mon opt-in for memory ([bd1c271](https://github.com/gazler/breeze/commit/bd1c271d7d91000dc7652aa3a3e8de70f305f0b8))
+- *(BackBreeze.Box)* Add output format to render_with_dimensions/2 ([037d7ba](https://github.com/gazler/breeze/commit/037d7ba307e1b03a1b46ae166c6312a9d5b31248))
 
 ### Bug Fixes
 
@@ -16,6 +18,10 @@
 - *(BackBreeze.Grid)* Inherit parent bg in grid ([d3451d5](https://github.com/gazler/breeze/commit/d3451d5d4888bfb2b22697565786478eb59d0dec))
 - *(BackBreeze.Box)* Fix absolute nested scroll bars ([b1a86d2](https://github.com/gazler/breeze/commit/b1a86d2b6945cf70cbd02ebe91fe3e8819d22931))
 
+### Other
+
+- Add standalone fullscreen navigation workloads ([fd4322c](https://github.com/gazler/breeze/commit/fd4322cdf039328f8eaad2bea6be3ddec040e462))
+
 ### Refactor
 
 - *(BackBreeze.Box)* Extract layout concerns and streamline caching ([4955447](https://github.com/gazler/breeze/commit/49554474a2830829a33ba51039cf77aefd455fc4))
@@ -24,6 +30,11 @@
 
 - *(BackBreeze.Box.LayerMap)* Optimize composition ([1df66d8](https://github.com/gazler/breeze/commit/1df66d81913402d0263736b99d40f7723162cc11))
 - *(BackBreeze.Box)* Avoid redundant layer map scans ([3046b7d](https://github.com/gazler/breeze/commit/3046b7dbc295f3ef955bd0c4cb7ddfcfed0d1c93))
+- Reduce ASCII measurement and word-wrapping work ([19cd098](https://github.com/gazler/breeze/commit/19cd098e85a63fe0d8b998d638d6229edd053f21))
+- Reduce layer composition and fill traversal work ([f2ed1cb](https://github.com/gazler/breeze/commit/f2ed1cb6c0c11005a89a665f757610795e0e7d93))
+- Defer text and layer materialization through layout ([2f3bfba](https://github.com/gazler/breeze/commit/2f3bfba7bbba54a647d861fc5bb2deca862a126d))
+- Add a direct layout path for single-line rows ([fa7ad6e](https://github.com/gazler/breeze/commit/fa7ad6e3d72d1ff2048481ce41089498f088036d))
+- Retain compact scenes in the frame cache ([ac52b8f](https://github.com/gazler/breeze/commit/ac52b8fe96582579d5d841d70fbc4d24d0d99cdc))
 ## [0.4.1] - 2026-07-09
 
 ### Bug Fixes
@@ -122,3 +133,4 @@
 - *(style)* Handle text overflowing ([fd3b196](https://github.com/gazler/breeze/commit/fd3b1969f5cdf1151e17ce143590d5953cfe438f))
 - *(style)* Allow offsets when reflowing text ([babba8a](https://github.com/gazler/breeze/commit/babba8a68633d8c1087904e69fff280563c1acb4))
 ## [0.1.0] - 2024-06-13
+
