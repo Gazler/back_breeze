@@ -17,7 +17,7 @@ defmodule BackBreeze.Box.BlockLayerMap do
       ) do
     (structured? and structured_scrolled?(box, relative)) or
       (structured?(box, relative) and
-         (structured? or
+         (structured? or Enum.any?(relative, &BackBreeze.Box.Scene.deferred?(&1.layer_map)) or
             ((absolutes != [] or relative_has_overlay?) and
                Enum.any?(relative, &rendered_layer_map_entries?/1))))
   end
@@ -45,7 +45,10 @@ defmodule BackBreeze.Box.BlockLayerMap do
 
   defp scrolled_viewport?(box) do
     match?(width when is_integer(width) and width > 0, Geometry.resolved_parent_width(box, [])) and
-      match?(height when is_integer(height) and height > 0, Geometry.resolved_parent_height(box, []))
+      match?(
+        height when is_integer(height) and height > 0,
+        Geometry.resolved_parent_height(box, [])
+      )
   end
 
   defp scrolled_child_supported?(child) do
@@ -72,8 +75,14 @@ defmodule BackBreeze.Box.BlockLayerMap do
         {
           max(layout.width, painted.width),
           max(layout.height, painted.height),
-          Map.merge(layout.layer_map, painted.layer_map),
-          Map.merge(layout.fixed_layer_map, painted.fixed_layer_map)
+          Map.merge(
+            BackBreeze.Box.Scene.materialize(layout.layer_map),
+            BackBreeze.Box.Scene.materialize(painted.layer_map)
+          ),
+          Map.merge(
+            BackBreeze.Box.Scene.materialize(layout.fixed_layer_map),
+            BackBreeze.Box.Scene.materialize(painted.fixed_layer_map)
+          )
         }
     end
   end
@@ -99,13 +108,10 @@ defmodule BackBreeze.Box.BlockLayerMap do
            width: viewport_width,
            height: viewport_height
          },
-         {:ok, layer_map, fills, wide?, _max_width, _max_height} <-
+         {:ok, fragments, _max_width, _max_height} <-
            compose_scrolled_child_layer_maps(children, viewport) do
       layer_map =
-        layer_map
-        |> LayerMap.put_default_fill_entries(fills)
-        |> LayerMap.mark_wide_glyph_metadata(wide?)
-        |> LayerMap.filter(%{
+        LayerMap.compose_fragments(fragments, %{
           start_x: 0,
           start_y: 0,
           max_x: viewport_width - 1,
@@ -205,16 +211,14 @@ defmodule BackBreeze.Box.BlockLayerMap do
 
   defp simple_child_entry(child, height, width) do
     case simple_child_layer_map(child) do
-      {:ok, child_map, child_fills, child_wide?, child_width} ->
+      {:ok, fragment, child_width} ->
         {:ok,
          %{
            type: :layer_map,
            height: height,
            width: width,
            child_width: child_width,
-           layer_map: child_map,
-           fills: child_fills,
-           wide?: child_wide?
+           fragment: fragment
          }}
 
       :blank ->
@@ -234,15 +238,11 @@ defmodule BackBreeze.Box.BlockLayerMap do
          height: height,
          width: width,
          child_width: child_width,
-         layer_map: child_map,
-         fills: child_fills,
-         wide?: child_wide?
+         fragment: fragment
        }) do
     %{
       state
-      | layer_map: Map.merge(state.layer_map, child_map),
-        fills: child_fills ++ state.fills,
-        wide?: state.wide? or child_wide?,
+      | fragments: [fragment | state.fragments],
         height: state.height + height,
         width: max(state.width, max(width, child_width))
     }
@@ -251,22 +251,18 @@ defmodule BackBreeze.Box.BlockLayerMap do
   defp finish_simple_layer_map(:error), do: :error
 
   defp finish_simple_layer_map(%{
-         layer_map: layer_map,
-         fills: fills,
-         wide?: wide?,
+         fragments: fragments,
          height: height,
          width: width
        }) do
     layer_map =
-      layer_map
-      |> LayerMap.put_default_fill_entries(fills)
-      |> LayerMap.mark_wide_glyph_metadata(wide?)
+      fragments |> Enum.reverse() |> LayerMap.compose_fragments()
 
     {width, height, layer_map, %{}}
   end
 
   defp empty_simple_state do
-    %{layer_map: %{}, fills: [], wide?: false, height: 0, width: 0}
+    %{fragments: [], height: 0, width: 0}
   end
 
   defp compose_scrolled_child_layer_maps(children, %{
@@ -322,21 +318,16 @@ defmodule BackBreeze.Box.BlockLayerMap do
   end
 
   defp visible_scrolled_child_entry(child, bounds, scroll) do
-    case simple_child_layer_map(child) do
-      {:ok, child_map, child_fills, child_wide?, _child_width} ->
-        {shifted_map, shifted_fills, shifted_wide?} =
-          LayerMap.shift_simple_child(child_map, -scroll.left, -scroll.top)
-
-        shifted_fills =
-          LayerMap.shifted_default_fill_entries(child_fills, -scroll.left, -scroll.top) ++
-            shifted_fills
-
+    case simple_child_layer_map(
+           child,
+           (child.left || 0) - scroll.left,
+           (child.top || 0) - scroll.top
+         ) do
+      {:ok, fragment, _child_width} ->
         {:ok,
          Map.merge(bounds, %{
            type: :layer_map,
-           layer_map: shifted_map,
-           fills: shifted_fills,
-           wide?: child_wide? or shifted_wide?
+           fragment: fragment
          })}
 
       :blank ->
@@ -350,9 +341,7 @@ defmodule BackBreeze.Box.BlockLayerMap do
   defp append_scrolled_child_entry(state, %{type: :layer_map} = entry) do
     %{
       state
-      | layer_map: Map.merge(state.layer_map, entry.layer_map),
-        fills: entry.fills ++ state.fills,
-        wide?: state.wide? or entry.wide?,
+      | fragments: [entry.fragment | state.fragments],
         max_width: max(state.max_width, entry.max_width),
         max_height: max(state.max_height, entry.max_height)
     }
@@ -369,34 +358,30 @@ defmodule BackBreeze.Box.BlockLayerMap do
   defp finish_scrolled_layer_map(:error), do: :error
 
   defp finish_scrolled_layer_map(%{
-         layer_map: layer_map,
-         fills: fills,
-         wide?: wide?,
+         fragments: fragments,
          max_width: max_width,
          max_height: max_height
        }) do
-    {:ok, layer_map, fills, wide?, max_width, max_height}
+    {:ok, Enum.reverse(fragments), max_width, max_height}
   end
 
   defp empty_scrolled_state do
-    %{layer_map: %{}, fills: [], wide?: false, max_width: 0, max_height: 0}
+    %{fragments: [], max_width: 0, max_height: 0}
   end
 
   defp simple_child_layer_map(child) do
+    simple_child_layer_map(child, child.left || 0, child.top || 0)
+  end
+
+  defp simple_child_layer_map(child, left, top) do
     cond do
       layer_map_entries?(child.layer_map) or default_fill_entries(child.layer_map) != [] ->
-        {child_map, child_fills, child_wide?} =
-          LayerMap.shift_simple_child(child.layer_map, child.left || 0, child.top || 0)
-
-        {:ok, child_map, child_fills, child_wide?, child.width || 0}
+        {:ok, {child.layer_map, left, top}, child.width || 0}
 
       is_binary(child.content) and child.content != "" ->
         {content_map, max_x, _max_y} = LayerMap.cached_generate(child.content)
 
-        {child_map, child_fills, child_wide?} =
-          LayerMap.shift_simple_child(content_map, child.left || 0, child.top || 0)
-
-        {:ok, child_map, child_fills, child_wide?, max_x + 1}
+        {:ok, {content_map, left, top}, max_x + 1}
 
       child.content in ["", nil] ->
         :blank

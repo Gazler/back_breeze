@@ -77,7 +77,7 @@ defmodule BackBreeze.RenderCacheTest do
       :ets.tab2list(:back_breeze_render_cache)
       |> Enum.map(&elem(&1, 0))
       |> Enum.filter(fn
-        {:stable, {:render_self, _, _, _, _}} -> true
+        {:stable, {:render_self, _, _, _, _, _}} -> true
         {:stable, {:generate_layer_map, _}} -> true
         {:stable, {:layer_maps_to_content, _, _, _}} -> true
         _ -> false
@@ -117,7 +117,7 @@ defmodule BackBreeze.RenderCacheTest do
     assert Default.limit_for_available_memory(8 * gibibyte) == gibibyte
   end
 
-  test "warns and uses 256 MiB when the memory supervisor is unavailable" do
+  test "logs at debug and uses 256 MiB when the memory supervisor is unavailable" do
     previous_value = Application.fetch_env(:back_breeze, :render_cache_max_memory_bytes)
 
     on_exit(fn ->
@@ -133,8 +133,12 @@ defmodule BackBreeze.RenderCacheTest do
     refute Process.whereis(:memsup)
     Application.delete_env(:back_breeze, :render_cache_max_memory_bytes)
 
+    assert capture_log([level: :info], fn ->
+             assert MemoryLimit.resolve() == 256 * 1_024 * 1_024
+           end) == ""
+
     log =
-      capture_log(fn ->
+      capture_log([level: :debug], fn ->
         assert MemoryLimit.resolve() == 256 * 1_024 * 1_024
       end)
 

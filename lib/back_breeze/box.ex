@@ -12,6 +12,7 @@ defmodule BackBreeze.Box do
   alias BackBreeze.RenderCache
   alias BackBreeze.VirtualText
   alias BackBreeze.Box.LayerMap
+  alias BackBreeze.Box.Scene
   alias BackBreeze.Box.PositionedLayout
   alias BackBreeze.Box.TextMetrics
   alias BackBreeze.Grid.Children, as: GridChildren
@@ -73,6 +74,8 @@ defmodule BackBreeze.Box do
   ## Options
 
     * `:terminal` - the terminal to use. This is used for the terminal size if provided.
+    * `:output` - `:full` (default) retains the rendered tree and layer maps.
+      `:content` returns ANSI content and box size with empty children and layer maps.
   """
   def render(box, opts \\ []) do
     render_with_dimensions(box, opts)
@@ -85,6 +88,7 @@ defmodule BackBreeze.Box do
   This function returns the box as with `render/2`, but it is wrapped in a map which
   also contains the rendered dimension for each box as a flat list.
   This can be used at a higher level to determine the viewport.
+  With `output: :content`, the complete dimensions list is still returned.
 
   ## Options
 
@@ -96,8 +100,28 @@ defmodule BackBreeze.Box do
       fetch_box_render(box, fn -> render_with_dimensions_cache_key(box, opts) end, fn ->
         do_render_with_dimensions(box, opts)
       end)
+      |> Map.update!(:box, &render_output(&1, Keyword.get(opts, :output, :full)))
       |> maybe_flatten_rendered_box(opts)
     end)
+  end
+
+  defp render_output(box, :full), do: ensure_rendered_content(box)
+
+  defp render_output(box, :content) do
+    rendered =
+      case box do
+        %{layer_map: %{__scene__: _} = scene, fixed_layer_map: fixed} = rendered
+        when map_size(fixed) == 0 ->
+          content =
+            Scene.to_content(scene, %{start_x: 0, start_y: 0, max_x: rendered.width - 1, max_y: rendered.height - 1})
+
+          %{rendered | content: content}
+
+        rendered ->
+          ensure_rendered_content(rendered)
+      end
+
+    %{rendered | children: [], layer_map: %{}, fixed_layer_map: %{}}
   end
 
   defp do_render_with_dimensions(box, opts) do
@@ -105,7 +129,6 @@ defmodule BackBreeze.Box do
       render_and_calc(%{box: box, dimensions: [], id: 0}, opts)
 
     dimensions = Enum.sort(dimensions) |> Enum.map(&elem(&1, 1))
-    box = ensure_rendered_content(box)
     %{box: box, dimensions: dimensions}
   end
 
@@ -118,6 +141,26 @@ defmodule BackBreeze.Box do
     end)
   end
 
+  defp finish_structured_result(%{box: box} = result, opts) do
+    layer_map =
+      if Keyword.get(opts, :defer_layers, false) do
+        # Small boxes are cheaper to keep flat. Promote larger leaf maps once,
+        # before caching, so parent layout only moves their fragment metadata.
+        if map_size(box.layer_map) > 256, do: Scene.wrap(box.layer_map), else: box.layer_map
+      else
+        Scene.materialize(box.layer_map)
+      end
+
+    %{
+      result
+      | box: %{
+          box
+          | layer_map: layer_map,
+            fixed_layer_map: Scene.materialize(box.fixed_layer_map)
+        }
+    }
+  end
+
   defp do_render_structured_with_dimensions(box, opts) do
     %{box: box, dimensions: dimensions} =
       render_and_calc(
@@ -126,6 +169,7 @@ defmodule BackBreeze.Box do
       )
 
     %{box: box, dimensions: Enum.sort(dimensions) |> Enum.map(&elem(&1, 1))}
+    |> finish_structured_result(opts)
   end
 
   @doc false
@@ -154,7 +198,8 @@ defmodule BackBreeze.Box do
   end
 
   defp render_structured_cache_key(box, opts) do
-    {:render_structured_with_dimensions, terminal_size(opts), CacheKey.box_key(box)}
+    {:render_structured_with_dimensions, Keyword.get(opts, :defer_layers, false), terminal_size(opts),
+     CacheKey.box_key(box)}
   end
 
   defp structured_render?(opts), do: Keyword.get(opts, :structured, false)
@@ -395,7 +440,7 @@ defmodule BackBreeze.Box do
         layer_map
       }
     else
-      {content, width, %{}}
+      {content, width, direct_layer_map || %{}}
     end
   end
 
@@ -730,6 +775,8 @@ defmodule BackBreeze.Box do
 
   defp regular_child_container_content(_box, _layer_result, %{structured?: true}), do: nil
 
+  defp regular_child_container_content(_box, %{layer_map: %{__scene__: _}}, _context), do: nil
+
   defp regular_child_container_content(box, layer_result, _context) do
     BenchProfile.measure({__MODULE__, :layer_maps_to_content}, fn ->
       cached_or_layer_maps_to_content(
@@ -898,7 +945,7 @@ defmodule BackBreeze.Box do
     box = normalize_container_box(box)
 
     cache_key =
-      {:render_self, box.style, CacheKey.content_key(box.content), offset_top,
+      {:render_self, Keyword.get(opts, :structured, false), box.style, CacheKey.content_key(box.content), offset_top,
        if(terminal, do: terminal.size, else: nil)}
 
     render = fn ->
@@ -951,7 +998,7 @@ defmodule BackBreeze.Box do
     absolutes = grid_absolute_children(children)
     relative_has_overlay? = overlay_children?(relative)
 
-    if not Keyword.get(opts, :structured, false) and
+    if is_binary(grid_result.content) and not Keyword.get(opts, :structured, false) and
          plain_content_children?(box, absolutes, has_overlay_children?, relative_has_overlay?) do
       {grid_result.content, %{}, grid_result.width, grid_result.height, false, layer, children, acc}
     else
@@ -972,8 +1019,10 @@ defmodule BackBreeze.Box do
       {layer_map, fixed_layer_map, width, height, acc} =
         combine_children(acc, combine_context)
 
-      width = max(width, raw_content_width(grid_result.content))
-      height = max(height, rendered_height(grid_result.content))
+      # Structured grids may omit content, so retain the measured grid extent
+      # rather than relying on serialized text to supply the final row/column.
+      width = max(width, grid_result.width)
+      height = max(height, grid_result.height)
 
       {layer_map, fixed_layer_map, width, height, has_overlay_children?, layer, children, acc}
     end
@@ -1017,7 +1066,7 @@ defmodule BackBreeze.Box do
 
     grid_context = %{
       box: box,
-      opts: opts,
+      opts: Keyword.put(opts, :defer_layers, true),
       item_width: item_width,
       item_height: item_height,
       column_widths: column_widths,
@@ -1037,7 +1086,12 @@ defmodule BackBreeze.Box do
       fixed_layer_map: _grid_fixed_layer_map
     } =
       grid_result =
-      BackBreeze.Grid.render_with_dimensions(children, box.display, box.style, opts)
+      BackBreeze.Grid.render_structured_with_dimensions(
+        children,
+        box.display,
+        box.style,
+        Keyword.put(opts, :defer_layers, true)
+      )
 
     {children, grouped_dims, grid_result}
   end
@@ -1108,9 +1162,11 @@ defmodule BackBreeze.Box do
             context.opts
           end
 
-        LayoutOnly.child_result(child, layout_opts) ||
+        BackBreeze.Box.InlineLayout.child_result(child, layout_opts) ||
+          LayoutOnly.child_result(child, layout_opts) ||
           render_cached_with_dimensions(child,
             structured: true,
+            defer_layers: true,
             terminal: Keyword.get(context.opts, :terminal)
           )
       end)
@@ -1190,7 +1246,44 @@ defmodule BackBreeze.Box do
     |> Keyword.put(:scroll, box.scroll)
   end
 
-  defp join_flow_children(box, context, opts) do
+  defp join_flow_children(%{display: :inline} = box, %{structured?: true} = context, opts) do
+    case inline_layers(context.relative) do
+      {:ok, fragments, width} ->
+        bounds = %{start_x: 0, start_y: 0, max_x: width - 1, max_y: 0}
+        {nil, width, 0, Scene.compose(fragments, bounds), %{}}
+
+      :error ->
+        do_join_flow_children(box, context, opts)
+    end
+  end
+
+  defp join_flow_children(box, context, opts), do: do_join_flow_children(box, context, opts)
+
+  defp inline_layers(children) do
+    Enum.reduce_while(children, {:ok, [], 0}, fn child, {:ok, fragments, x} ->
+      if child.height == 1 and is_integer(child.width) and child.width > 0 and
+           not child.overlay? and map_size(fixed_layer_map(child)) == 0 do
+        layer =
+          if LayerMap.content?(child.layer_map),
+            do: child.layer_map,
+            else: if(is_binary(child.content), do: elem(LayerMap.cached_generate(child.content), 0), else: %{})
+
+        if Scene.supported?(layer) do
+          {:cont, {:ok, [{layer, x, 0} | fragments], x + child.width}}
+        else
+          {:halt, :error}
+        end
+      else
+        {:halt, :error}
+      end
+    end)
+    |> case do
+      {:ok, fragments, width} when width > 0 -> {:ok, Enum.reverse(fragments), width}
+      _ -> :error
+    end
+  end
+
+  defp do_join_flow_children(box, context, opts) do
     retain_layer_map_context = %{
       relative: context.relative,
       absolutes: context.absolutes,
@@ -1219,7 +1312,7 @@ defmodule BackBreeze.Box do
   end
 
   defp finish_flow_children(acc, box, children, relative, context, content, width, height, opts) do
-    if not context.structured? and
+    if is_binary(content) and not context.structured? and
          plain_content_children?(
            box,
            context.absolutes,
@@ -1496,6 +1589,27 @@ defmodule BackBreeze.Box do
       end)
 
     offsets
+  end
+
+  defp ensure_rendered_content(%{layer_map: %{__scene__: _}, fixed_layer_map: fixed} = box)
+       when map_size(fixed) == 0 do
+    content =
+      Scene.to_content(box.layer_map, %{
+        start_x: 0,
+        start_y: 0,
+        max_x: box.width - 1,
+        max_y: box.height - 1
+      })
+
+    %{box | layer_map: Scene.materialize(box.layer_map), content: content}
+  end
+
+  defp ensure_rendered_content(%{layer_map: %{__scene__: _}} = box) do
+    ensure_rendered_content(%{box | layer_map: Scene.materialize(box.layer_map)})
+  end
+
+  defp ensure_rendered_content(%{fixed_layer_map: %{__scene__: _}} = box) do
+    ensure_rendered_content(%{box | fixed_layer_map: Scene.materialize(box.fixed_layer_map)})
   end
 
   defp ensure_rendered_content(%{content: content, fixed_layer_map: fixed_layer_map} = box)

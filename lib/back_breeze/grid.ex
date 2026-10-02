@@ -79,12 +79,33 @@ defmodule BackBreeze.Grid do
 
   @doc false
   def render_with_dimensions(items, grid, style, opts) do
-    render_with_dimensions(items, grid, style, opts, false)
+    result = render_with_dimensions(items, grid, style, opts, false)
+
+    if Keyword.get(opts, :defer_layers, false) do
+      result
+    else
+      result = materialize_result(result)
+
+      content =
+        result.content ||
+          BackBreeze.Box.layer_maps_to_content(result.layer_map, result.fixed_layer_map, result.width, result.height)
+
+      %{result | content: content}
+    end
   end
 
   @doc false
   def render_structured_with_dimensions(items, grid, style, opts) do
-    render_with_dimensions(items, grid, style, opts, true)
+    result = render_with_dimensions(items, grid, style, opts, true)
+    if Keyword.get(opts, :defer_layers, false), do: result, else: materialize_result(result)
+  end
+
+  defp materialize_result(result) do
+    %{
+      result
+      | layer_map: BackBreeze.Box.Scene.materialize(result.layer_map),
+        fixed_layer_map: BackBreeze.Box.Scene.materialize(result.fixed_layer_map)
+    }
   end
 
   defp render_with_dimensions(items, grid, style, opts, structured?) do
@@ -555,7 +576,7 @@ defmodule BackBreeze.Grid do
       end
 
     content =
-      if structured? do
+      if structured? or BackBreeze.Box.Scene.deferred?(layer_map) do
         nil
       else
         BackBreeze.Box.layer_maps_to_content(layer_map, fixed_layer_map, width, height)
@@ -707,6 +728,7 @@ defmodule BackBreeze.Grid do
   defp render_grid_item(item, style, true, opts) do
     BackBreeze.Box.render_cached_with_dimensions(%{item | style: style},
       structured: true,
+      defer_layers: true,
       terminal: Keyword.get(opts, :terminal)
     )
   end
@@ -714,6 +736,7 @@ defmodule BackBreeze.Grid do
   defp render_grid_item(item, style, false, opts) do
     BackBreeze.Box.render_cached_with_dimensions(%{item | style: style},
       structured: true,
+      defer_layers: true,
       terminal: Keyword.get(opts, :terminal)
     )
   end

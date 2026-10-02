@@ -39,7 +39,7 @@ defmodule BackBreeze.RenderCache.MemoryLimit do
         limit_for_available_memory(bytes)
 
       :error ->
-        Logger.warning(
+        Logger.debug(
           "BackBreeze could not read available system memory because OTP's :memsup " <>
             "is unavailable. Using the default 256 MiB render cache limit. Add :os_mon " <>
             "to your application's extra_applications to enable automatic sizing, or " <>

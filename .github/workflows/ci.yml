@@ -11,9 +11,16 @@ jobs:
     runs-on: ubuntu-latest
 
     strategy:
+      fail-fast: false
       matrix:
         elixir: ["1.18", "1.19"]
         otp: ["26", "27", "28"]
+        exclude:
+          - elixir: "1.18"
+            otp: "28"
+        include:
+          - elixir: "1.20"
+            otp: "29"
 
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4
@@ -32,5 +39,6 @@ jobs:
       - run: mix deps.get
 
       - run: mix format --check-formatted
+        if: matrix.elixir == '1.20'
 
       - run: mix test

@@ -310,6 +310,7 @@ defmodule BackBreeze.Style do
 
     layer_map =
       maybe_styled_layer_map(%{
+        structured?: Keyword.get(opts, :structured, false),
         source: source,
         scrollbar: scrollbar,
         overflow: overflow,
@@ -595,6 +596,41 @@ defmodule BackBreeze.Style do
 
   defp maybe_styled_layer_map(
          %{
+           source: source,
+           structured?: true,
+           auto_width?: false,
+           width: width,
+           padding_row_count: padding_rows,
+           repeat_x: repeat_x,
+           repeat_y: repeat_y,
+           scrollbar: scrollbar
+         } = context
+       )
+       when is_binary(source) and (byte_size(source) >= 1024 or (source == "" and width * padding_rows >= 1024)) and
+              repeat_x in [false, nil] and
+              repeat_y in [false, nil] and scrollbar in [false, nil] do
+    seq = Termite.Style.open_code(context.termite_style)
+
+    ascii? =
+      Enum.all?(context.lines, fn line ->
+        is_binary(line) and byte_size(line) <= context.width and
+          Regex.match?(~r/\A[\x20-\x7e]*\z/, line)
+      end)
+
+    border? =
+      Enum.all?(
+        [:top, :bottom, :left, :right, :top_left, :top_right, :bottom_left, :bottom_right],
+        fn side ->
+          char = Map.get(context.border, side)
+          is_nil(char) or Ucwidth.width(char) == 1
+        end
+      )
+
+    if seq != "" and ascii? and border?, do: compact_text_layer(context, seq), else: nil
+  end
+
+  defp maybe_styled_layer_map(
+         %{
            source: %VirtualText{cache?: false},
            scrollbar: scrollbar,
            overflow: :hidden,
@@ -606,6 +642,12 @@ defmodule BackBreeze.Style do
        )
        when scrollbar not in [false, nil] and repeat_x in [false, nil] and
               repeat_y in [false, nil] and is_integer(width) do
+    compact_styled_layer(context) || styled_cell_layer(context)
+  end
+
+  defp maybe_styled_layer_map(_context), do: nil
+
+  defp styled_cell_layer(context) do
     context =
       context
       |> Map.put(:border_seq, border_style_sequence(context.border))
@@ -630,7 +672,118 @@ defmodule BackBreeze.Style do
     |> compact_full_surface_fill(max_x, max_y)
   end
 
-  defp maybe_styled_layer_map(_context), do: nil
+  defp compact_styled_layer(context) do
+    base = Termite.Style.open_code(context.termite_style)
+
+    lines =
+      Enum.map(context.lines, fn
+        line when is_binary(line) ->
+          [{line, base}]
+
+        line ->
+          Enum.map(line, fn {text, style} ->
+            {text, merged_style_sequence(context.termite_style, style)}
+          end)
+      end)
+
+    supported? =
+      base != "" and
+        Enum.all?(lines, fn line ->
+          Enum.all?(line, fn {text, seq} ->
+            seq != "" and Regex.match?(~r/\A[\x20-\x7e]*\z/, text)
+          end) and
+            Enum.reduce(line, 0, fn {text, _}, n -> n + byte_size(text) end) <= context.width
+        end)
+
+    border? =
+      Enum.all?(
+        [:top, :bottom, :left, :right, :top_left, :top_right, :bottom_left, :bottom_right],
+        fn side ->
+          char = Map.get(context.border, side)
+          is_nil(char) or Ucwidth.width(char) == 1
+        end
+      )
+
+    if supported? and border? do
+      blank = [{String.duplicate(" ", context.inner_width), base}]
+
+      rows =
+        Enum.map(lines, fn line ->
+          width = Enum.reduce(line, 0, fn {text, _}, n -> n + byte_size(text) end)
+          {left, right} = horizontal_padding(context.text_align, context.width - width)
+
+          [{String.duplicate(" ", context.padding_left + left), base} | line] ++
+            [{String.duplicate(" ", context.padding_right + right), base}]
+        end)
+
+      rows =
+        List.duplicate(blank, context.padding_top) ++
+          rows ++
+          List.duplicate(blank, context.padding_bottom + context.padding_row_count)
+
+      compact_rows_layer(context, rows, :styled)
+    end
+  end
+
+  defp compact_text_layer(context, seq) do
+    context = Map.put(context, :border_seq, border_style_sequence(context.border))
+    blank = String.duplicate(" ", context.inner_width)
+
+    lines =
+      Enum.map(context.lines, fn line ->
+        {left, right} = horizontal_padding(context.text_align, context.width - byte_size(line))
+
+        String.duplicate(" ", context.padding_left + left) <>
+          line <>
+          String.duplicate(" ", context.padding_right + right)
+      end)
+
+    rows =
+      List.duplicate(blank, context.padding_top) ++
+        lines ++
+        List.duplicate(blank, context.padding_bottom + context.padding_row_count)
+
+    compact_rows_layer(context, rows, {:plain, seq})
+  end
+
+  defp compact_rows_layer(context, rows, kind) do
+    context = Map.put(context, :border_seq, border_style_sequence(context.border))
+
+    state = maybe_put_top_border(%{cells: %{}, y: 0, wide?: false}, context)
+    top = state.y
+    left = if context.border.left, do: 1, else: 0
+
+    state =
+      Enum.reduce(rows, state, fn _, state ->
+        {cells, _, _} =
+          put_optional_text(state.cells, %{
+            x: 0,
+            y: state.y,
+            text: context.border.left,
+            seq: context.border_seq,
+            wide?: false
+          })
+
+        {cells, _, _} =
+          put_optional_text(cells, %{
+            x: left + context.inner_width,
+            y: state.y,
+            text: context.border.right,
+            seq: context.border_seq,
+            wide?: false
+          })
+
+        %{state | cells: cells, y: state.y + 1}
+      end)
+
+    state = maybe_put_bottom_border(state, context)
+
+    case kind do
+      {:plain, seq} -> BackBreeze.Box.Scene.from_text_rows(rows, seq, left, top)
+      :styled -> BackBreeze.Box.Scene.from_styled_rows(rows, left, top)
+    end
+    |> BackBreeze.Box.Scene.merge(state.cells, {0, 0})
+  end
 
   defp maybe_put_top_border(%{y: y} = state, %{border: %{top: nil}}),
     do: %{state | y: y}

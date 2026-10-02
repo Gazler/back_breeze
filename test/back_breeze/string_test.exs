@@ -1,6 +1,30 @@
 defmodule BackBreeze.StringTest do
   use ExUnit.Case, async: true
 
+  test "already fitting ASCII lines avoid per-character wrapping" do
+    text = Enum.map_join(1..72, "\n", fn _ -> String.duplicate("x", 242) end)
+    BackBreeze.String.reflow("warm", 242)
+    {:reductions, before} = Process.info(self(), :reductions)
+    assert BackBreeze.String.reflow(text, 242) == text
+    {:reductions, after_render} = Process.info(self(), :reductions)
+    assert after_render - before < byte_size(text) * 3
+  end
+
+  test "reflow work grows linearly for long styled words" do
+    cost = fn size ->
+      input = "\e[32m" <> String.duplicate("x", size) <> "\e[0m"
+      {:reductions, before} = Process.info(self(), :reductions)
+      assert BackBreeze.String.reflow(input, size) == input
+      {:reductions, after_render} = Process.info(self(), :reductions)
+      after_render - before
+    end
+
+    cost.(100)
+    small = cost.(2000)
+    large = cost.(4000)
+    assert large < small * 3
+  end
+
   describe "reflow/3 by word" do
     test "simple line" do
       string = String.duplicate("hello world ", 5)
